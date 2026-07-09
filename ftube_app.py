@@ -46,10 +46,10 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
     background: transparent !important;
     color: #4a5068 !important;
     font-family: 'Inter', sans-serif !important;
-    font-size: 0.8rem !important;
+    font-size: 0.85rem !important;
     font-weight: 500 !important;
     letter-spacing: 0.06em !important;
-    padding: 10px 22px !important;
+    padding: 12px 36px !important;
     border: none !important;
     border-bottom: 2px solid transparent !important;
     border-radius: 0 !important;
