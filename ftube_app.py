@@ -307,11 +307,12 @@ if st.session_state.view == "home":
     # ── 탭1: 검색 ─────────────────────────────────────
     with tab1:
         st.markdown('<div class="section-label">YouTube 검색</div>', unsafe_allow_html=True)
-        s1, s2 = st.columns([5, 1])
-        with s1:
-            query = st.text_input("", placeholder="검색어 입력", label_visibility="collapsed", key="search_input")
-        with s2:
-            search_btn = st.button("검색", use_container_width=True, key="search_btn")
+        with st.form(key="search_form"):
+            s1, s2 = st.columns([5, 1])
+            with s1:
+                query = st.text_input("", placeholder="검색어 입력", label_visibility="collapsed")
+            with s2:
+                search_btn = st.form_submit_button("검색", use_container_width=True)
 
         if search_btn and query.strip():
             with st.spinner("검색 중..."):
