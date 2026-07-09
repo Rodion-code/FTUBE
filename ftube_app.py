@@ -2,6 +2,7 @@ import streamlit as st
 import tempfile
 import os
 import json
+from youtubesearchpython import VideosSearch
 
 st.set_page_config(page_title="FTUBE", page_icon="▶", layout="wide")
 
@@ -39,7 +40,7 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
 
 [data-testid="stTabs"] [role="tablist"] {
     border-bottom: 1px solid #1e2230 !important;
-    gap: 0 !important;
+    gap: 8px !important;
     background: transparent !important;
 }
 [data-testid="stTabs"] button[role="tab"] {
@@ -49,11 +50,12 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
     font-size: 0.85rem !important;
     font-weight: 500 !important;
     letter-spacing: 0.06em !important;
-    padding: 12px 60px !important;
+    padding: 12px 32px !important;
     border: none !important;
     border-bottom: 2px solid transparent !important;
     border-radius: 0 !important;
     transition: color 0.2s !important;
+    min-width: 100px !important;
 }
 [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
     color: #c8d0e8 !important;
@@ -134,6 +136,46 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
 }
 .btn-sm button:hover { color: #8890aa !important; background-color: #161b27 !important; }
 
+/* 검색 결과 카드 */
+.search-card {
+    background: #161b27;
+    border: 1px solid #1e2230;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: border-color 0.2s, transform 0.15s;
+    margin-bottom: 0;
+}
+.search-card:hover { border-color: #2e3450; transform: translateY(-2px); }
+.search-thumb {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    display: block;
+}
+.search-thumb-placeholder {
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: #1e2230;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+}
+.search-info { padding: 12px 14px 14px; }
+.search-title {
+    font-size: 0.83rem;
+    font-weight: 500;
+    color: #c8d0e8;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 6px;
+    min-height: 2.4em;
+}
+.search-meta { font-size: 0.7rem; color: #3a3f52; }
+
 .fav-card {
     background: #161b27;
     border: 1px solid #1e2230;
@@ -184,8 +226,7 @@ hr { border-color: #1e2230 !important; margin: 22px 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── 데이터 파일 ───────────────────────────────────────
-BASE = os.path.dirname(os.path.abspath(__file__))
+BASE     = os.path.dirname(os.path.abspath(__file__))
 FAV_FILE = os.path.join(BASE, "favorites.json")
 PL_FILE  = os.path.join(BASE, "playlists.json")
 
@@ -194,15 +235,13 @@ def load_json(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
-            pass
+        except: pass
     return []
 
 def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# ── 세션 초기화 ───────────────────────────────────────
 def sinit(k, v):
     if k not in st.session_state:
         st.session_state[k] = v
@@ -211,18 +250,19 @@ sinit("view", "home")
 sinit("url", "")
 sinit("title", "")
 sinit("favorites", load_json(FAV_FILE))
-sinit("playlists", load_json(PL_FILE))  # [{name, items:[{title,url}]}]
+sinit("playlists", load_json(PL_FILE))
 sinit("local_tmp", None)
 sinit("edit_fav_idx", None)
-sinit("pl_open", None)       # 열린 플레이리스트 인덱스
-sinit("pl_queue", [])        # 재생 중인 플레이리스트 큐
-sinit("pl_pos", 0)           # 현재 큐 위치
+sinit("pl_open", None)
+sinit("pl_queue", [])
+sinit("pl_pos", 0)
+sinit("search_results", [])
+sinit("search_query", "")
 
-# ── 헬퍼 ──────────────────────────────────────────────
 def play(url, title, queue=None, pos=0):
-    st.session_state.url   = url
-    st.session_state.title = title
-    st.session_state.view  = "player"
+    st.session_state.url      = url
+    st.session_state.title    = title
+    st.session_state.view     = "player"
     st.session_state.pl_queue = queue or []
     st.session_state.pl_pos   = pos
     st.rerun()
@@ -246,7 +286,9 @@ def clean_tmp():
 def save_playlists():
     save_json(PL_FILE, st.session_state.playlists)
 
-# ── 헤더 ──────────────────────────────────────────────
+def yt_url(video_id):
+    return f"https://www.youtube.com/watch?v={video_id}"
+
 st.markdown("""
 <div class="ftube-header">
     <span class="ftube-logo">F<span>TUBE</span></span>
@@ -259,10 +301,76 @@ st.markdown("""
 # ══════════════════════════════════════════════════════
 if st.session_state.view == "home":
 
-    tab1, tab2, tab3 = st.tabs(["URL / 파일", "즐겨찾기", "플레이리스트"])
+    tab1, tab2, tab3, tab4 = st.tabs(["검색", "URL / 파일", "즐겨찾기", "플레이리스트"])
 
-    # ── 탭1: URL / 파일 ───────────────────────────────
+    # ── 탭1: 검색 ─────────────────────────────────────
     with tab1:
+        st.markdown('<div class="section-label">YouTube 검색</div>', unsafe_allow_html=True)
+        s1, s2 = st.columns([5, 1])
+        with s1:
+            query = st.text_input("", placeholder="검색어 입력", label_visibility="collapsed", key="search_input")
+        with s2:
+            search_btn = st.button("검색", use_container_width=True, key="search_btn")
+
+        if search_btn and query.strip():
+            with st.spinner("검색 중..."):
+                try:
+                    vs = VideosSearch(query.strip(), limit=9)
+                    results = vs.result()["result"]
+                    st.session_state.search_results = results
+                    st.session_state.search_query = query.strip()
+                except Exception as e:
+                    st.error(f"검색 실패: {e}")
+
+        if st.session_state.search_results:
+            st.write("")
+            cols = st.columns(3)
+            for i, r in enumerate(st.session_state.search_results):
+                vid_id    = r.get("id", "")
+                title     = r.get("title", "제목 없음")
+                channel   = r.get("channel", {}).get("name", "")
+                duration  = r.get("duration", "")
+                thumbs    = r.get("thumbnails", [])
+                thumb_url = thumbs[0]["url"] if thumbs else None
+                url       = yt_url(vid_id)
+
+                with cols[i % 3]:
+                    if thumb_url:
+                        st.markdown(f'''
+                        <div class="search-card">
+                            <img class="search-thumb" src="{thumb_url}" />
+                            <div class="search-info">
+                                <div class="search-title">{title}</div>
+                                <div class="search-meta">{channel} · {duration}</div>
+                            </div>
+                        </div>
+                        ''', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'''
+                        <div class="search-card">
+                            <div class="search-thumb-placeholder">▶</div>
+                            <div class="search-info">
+                                <div class="search-title">{title}</div>
+                                <div class="search-meta">{channel} · {duration}</div>
+                            </div>
+                        </div>
+                        ''', unsafe_allow_html=True)
+
+                    bc, fc = st.columns([3, 1])
+                    with bc:
+                        if st.button("▶ 재생", key=f"sr_play_{i}", use_container_width=True):
+                            play(url, title)
+                    with fc:
+                        st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
+                        fl = "★" if is_fav(url) else "☆"
+                        if st.button(fl, key=f"sr_fav_{i}", use_container_width=True):
+                            toggle_fav(title, url)
+                            st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    st.write("")
+
+    # ── 탭2: URL / 파일 ───────────────────────────────
+    with tab2:
         st.markdown('<div class="section-label">URL로 재생</div>', unsafe_allow_html=True)
         c1, c2 = st.columns([5, 1])
         with c1:
@@ -296,15 +404,14 @@ if st.session_state.view == "home":
             st.session_state.local_tmp = tmp.name
             play(tmp.name, f.name)
 
-    # ── 탭2: 즐겨찾기 ─────────────────────────────────
-    with tab2:
+    # ── 탭3: 즐겨찾기 ─────────────────────────────────
+    with tab3:
         st.markdown('<div class="section-label">저장된 영상</div>', unsafe_allow_html=True)
         favs = st.session_state.favorites
         if not favs:
             st.markdown('<div class="fav-empty">저장된 영상이 없어.<br>재생 화면에서 ☆ 버튼으로 추가해봐.</div>', unsafe_allow_html=True)
         else:
             for idx, fv in enumerate(favs):
-                # 제목 수정 모드
                 if st.session_state.edit_fav_idx == idx:
                     new_title = st.text_input("제목 수정", value=fv["title"], key=f"edit_title_{idx}")
                     sc1, sc2 = st.columns([1, 1])
@@ -346,11 +453,10 @@ if st.session_state.view == "home":
                         st.markdown('</div>', unsafe_allow_html=True)
                 st.write("")
 
-    # ── 탭3: 플레이리스트 ─────────────────────────────
-    with tab3:
+    # ── 탭4: 플레이리스트 ─────────────────────────────
+    with tab4:
         pls = st.session_state.playlists
 
-        # 플레이리스트 상세 보기
         if st.session_state.pl_open is not None:
             pi = st.session_state.pl_open
             if pi >= len(pls):
@@ -367,14 +473,12 @@ if st.session_state.view == "home":
             st.write("")
             st.markdown(f'<div class="section-label">{pl["name"]}</div>', unsafe_allow_html=True)
 
-            # 전체 재생
             if pl["items"]:
                 if st.button("▶ 전체 재생", key="pl_play_all", use_container_width=False):
                     play(pl["items"][0]["url"], pl["items"][0]["title"], queue=pl["items"], pos=0)
 
             st.write("")
 
-            # 항목 목록
             for ii, item in enumerate(pl["items"]):
                 st.markdown(f"""
                 <div class="pl-item">
@@ -419,7 +523,7 @@ if st.session_state.view == "home":
 
             st.markdown("---")
             st.markdown('<div class="section-label">영상 추가</div>', unsafe_allow_html=True)
-            add_url = st.text_input("", placeholder="URL 붙여넣기", label_visibility="collapsed", key="pl_add_url")
+            add_url   = st.text_input("", placeholder="URL 붙여넣기", label_visibility="collapsed", key="pl_add_url")
             add_title = st.text_input("", placeholder="제목 (선택)", label_visibility="collapsed", key="pl_add_title")
             if st.button("추가", key="pl_add_btn", use_container_width=False):
                 if add_url.strip():
@@ -428,7 +532,6 @@ if st.session_state.view == "home":
                     save_playlists()
                     st.rerun()
 
-            # 즐겨찾기에서 추가
             if st.session_state.favorites:
                 st.markdown("---")
                 st.markdown('<div class="section-label">즐겨찾기에서 추가</div>', unsafe_allow_html=True)
@@ -443,12 +546,8 @@ if st.session_state.view == "home":
                             save_playlists()
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
-
-        # 플레이리스트 목록
         else:
             st.markdown('<div class="section-label">플레이리스트</div>', unsafe_allow_html=True)
-
-            # 새 플레이리스트 만들기
             new_pl_name = st.text_input("", placeholder="새 플레이리스트 이름", label_visibility="collapsed", key="new_pl_name")
             if st.button("+ 만들기", key="create_pl", use_container_width=False):
                 if new_pl_name.strip():
@@ -505,7 +604,6 @@ elif st.session_state.view == "player":
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # 플레이리스트 이전/다음
     if queue:
         nc1, nc2, nc3 = st.columns([1, 1, 4])
         with nc1:
