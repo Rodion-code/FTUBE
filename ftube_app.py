@@ -2,7 +2,8 @@ import streamlit as st
 import tempfile
 import os
 import json
-from youtubesearchpython import VideosSearch
+import requests
+import re
 
 st.set_page_config(page_title="FTUBE", page_icon="▶", layout="wide")
 
@@ -315,10 +316,27 @@ if st.session_state.view == "home":
         if search_btn and query.strip():
             with st.spinner("검색 중..."):
                 try:
-                    vs = VideosSearch(query.strip(), limit=9)
-                    results = vs.result()["result"]
-                    st.session_state.search_results = results
-                    st.session_state.search_query = query.strip()
+                    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+                    resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(query.strip())}", headers=headers)
+                    raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
+                    if not raw:
+                        st.error("검색 결과를 가져오지 못했어.")
+                    else:
+                        data = json.loads(raw[0])
+                        items = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]["sectionListRenderer"]["contents"][0]["itemSectionRenderer"]["contents"]
+                        results = []
+                        for item in items:
+                            if "videoRenderer" in item and len(results) < 9:
+                                v = item["videoRenderer"]
+                                vid_id = v.get("videoId", "")
+                                title  = v.get("title", {}).get("runs", [{}])[0].get("text", "제목 없음")
+                                channel = v.get("ownerText", {}).get("runs", [{}])[0].get("text", "")
+                                duration = v.get("lengthText", {}).get("simpleText", "")
+                                thumbs = v.get("thumbnail", {}).get("thumbnails", [])
+                                thumb = thumbs[-1]["url"] if thumbs else None
+                                results.append({"id": vid_id, "title": title, "channel": {"name": channel}, "duration": duration, "thumbnails": [{"url": thumb}] if thumb else []})
+                        st.session_state.search_results = results
+                        st.session_state.search_query = query.strip()
                 except Exception as e:
                     st.error(f"검색 실패: {e}")
 
