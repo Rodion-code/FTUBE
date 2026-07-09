@@ -1,2 +1,2 @@
 streamlit
-youtubesearchpython
+youtube-search-python
