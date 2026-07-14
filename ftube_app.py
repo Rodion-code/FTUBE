@@ -252,7 +252,11 @@ def toggle_fav(title, url, channel=""):
     if existing.data:
         sb.table("favorites").delete().eq("id", existing.data[0]["id"]).execute()
     else:
-        sb.table("favorites").insert({"user_id": uid, "title": title, "url": url, "channel": channel}).execute()
+        try:
+            sb.table("favorites").insert({"user_id": uid, "title": title, "url": url, "channel": channel}).execute()
+        except Exception:
+            # channel 컬럼이 아직 없는 DB일 수 있음 (마이그레이션 전) → channel 없이 재시도
+            sb.table("favorites").insert({"user_id": uid, "title": title, "url": url}).execute()
 
 def is_fav(url):
     if not st.session_state.user:
@@ -278,7 +282,15 @@ def play(url, title, channel="", queue=None, pos=0):
                 "channel": channel
             }).execute()
         except Exception:
-            pass  # 기록 저장 실패는 재생 자체를 막지 않음
+            try:
+                # channel 컬럼이 아직 없는 DB일 수 있음 (마이그레이션 전) → channel 없이 재시도
+                sb.table("history").insert({
+                    "user_id": st.session_state.user["id"],
+                    "title": title,
+                    "url": url
+                }).execute()
+            except Exception:
+                pass  # 그래도 실패하면 기록 저장은 포기하고 재생은 계속 진행
     st.rerun()
 
 def get_history(limit=50):
