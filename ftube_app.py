@@ -219,6 +219,7 @@ def sinit(k, v):
 sinit("view", "home")
 sinit("url", "")
 sinit("title", "")
+sinit("channel", "")
 sinit("local_tmp", None)
 sinit("edit_fav_idx", None)
 sinit("pl_open", None)
@@ -243,7 +244,7 @@ def get_playlists():
     res = sb.table("playlists").select("*").eq("user_id", st.session_state.user["id"]).execute()
     return res.data or []
 
-def toggle_fav(title, url):
+def toggle_fav(title, url, channel=""):
     if not st.session_state.user:
         return
     uid = st.session_state.user["id"]
@@ -251,7 +252,7 @@ def toggle_fav(title, url):
     if existing.data:
         sb.table("favorites").delete().eq("id", existing.data[0]["id"]).execute()
     else:
-        sb.table("favorites").insert({"user_id": uid, "title": title, "url": url}).execute()
+        sb.table("favorites").insert({"user_id": uid, "title": title, "url": url, "channel": channel}).execute()
 
 def is_fav(url):
     if not st.session_state.user:
@@ -260,9 +261,10 @@ def is_fav(url):
     res = sb.table("favorites").select("id").eq("user_id", uid).eq("url", url).execute()
     return bool(res.data)
 
-def play(url, title, queue=None, pos=0):
+def play(url, title, channel="", queue=None, pos=0):
     st.session_state.url      = url
     st.session_state.title    = title
+    st.session_state.channel  = channel
     st.session_state.view     = "player"
     st.session_state.pl_queue = queue or []
     st.session_state.pl_pos   = pos
@@ -272,7 +274,8 @@ def play(url, title, queue=None, pos=0):
             sb.table("history").insert({
                 "user_id": st.session_state.user["id"],
                 "title": title,
-                "url": url
+                "url": url,
+                "channel": channel
             }).execute()
         except Exception:
             pass  # 기록 저장 실패는 재생 자체를 막지 않음
@@ -323,7 +326,14 @@ def get_recommendations():
     if not all_titles:
         return [], ""
 
-    # 태그 분석
+    # 채널 기반 신호(최우선) — 자주 본 채널이 있으면 그 채널명을 검색어 맨 앞에 둠.
+    # 제목에 "버튜버" 같은 단어가 안 써있어도, 실제로 자주 보는 채널이면 반영되도록 함.
+    all_channels = [h.get("channel") for h in history] + [f.get("channel") for f in favs]
+    all_channels = [c for c in all_channels if c]
+    channel_counter = Counter(all_channels)
+    top_channels = [c for c, _ in channel_counter.most_common(2)]
+
+    # 장르 태그 (보조 신호)
     all_tags = []
     for t in all_titles:
         all_tags.extend(analyze_title(t))
@@ -350,8 +360,8 @@ def get_recommendations():
     else:
         top_keywords = [w for w, _ in counter.most_common(2)]
 
-    # 태그 + 키워드 조합
-    search_parts = top_tags + top_keywords
+    # 채널 > 장르 태그 > 일반 키워드 순으로 조합 (채널이 있으면 최우선으로 검색어 앞에 옴)
+    search_parts = list(dict.fromkeys(top_channels + top_tags + top_keywords))
     top_keyword  = " ".join(search_parts[:4])
 
     try:
@@ -529,11 +539,11 @@ if st.session_state.view == "home":
                     bc, fc = st.columns([3, 1])
                     with bc:
                         if st.button("▶ 재생", key=f"rec_play_{i}", use_container_width=True):
-                            play(url, title)
+                            play(url, title, channel)
                     with fc:
                         st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
                         if st.button("☆", key=f"rec_fav_{i}", use_container_width=True):
-                            toggle_fav(title, url)
+                            toggle_fav(title, url, channel)
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
                     st.write("")
@@ -603,11 +613,11 @@ if st.session_state.view == "home":
                     bc, fc = st.columns([3, 1])
                     with bc:
                         if st.button("▶ 재생", key=f"sr_play_{i}", use_container_width=True):
-                            play(url, title)
+                            play(url, title, channel)
                     with fc:
                         st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
                         if st.button("☆", key=f"sr_fav_{i}", use_container_width=True):
-                            toggle_fav(title, url)
+                            toggle_fav(title, url, channel)
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
                     st.write("")
@@ -679,7 +689,7 @@ if st.session_state.view == "home":
                     pc, ec, dc = st.columns([3, 1, 1])
                     with pc:
                         if st.button("▶ 재생", key=f"fp_{idx}", use_container_width=True):
-                            play(fv["url"], fv["title"])
+                            play(fv["url"], fv["title"], fv.get("channel", ""))
                     with ec:
                         st.markdown('<div class="btn-sm">', unsafe_allow_html=True)
                         if st.button("수정", key=f"edit_{idx}", use_container_width=True):
@@ -830,7 +840,7 @@ if st.session_state.view == "home":
                 hc1, hc2 = st.columns([3, 1])
                 with hc1:
                     if st.button("▶ 재생", key=f"hist_play_{idx}", use_container_width=True):
-                        play(h["url"], h["title"])
+                        play(h["url"], h["title"], h.get("channel", ""))
                 with hc2:
                     st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
                     if st.button("삭제", key=f"hist_del_{idx}", use_container_width=True):
@@ -859,7 +869,7 @@ elif st.session_state.view == "player":
         fav_txt = "★ 즐겨찾기됨" if is_fav(st.session_state.url) else "☆ 즐겨찾기"
         st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
         if st.button(fav_txt, use_container_width=True, key="player_fav"):
-            toggle_fav(st.session_state.title, st.session_state.url)
+            toggle_fav(st.session_state.title, st.session_state.url, st.session_state.channel)
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -950,7 +960,7 @@ elif st.session_state.view == "player":
                     </div>
                     ''', unsafe_allow_html=True)
                     if st.button("▶", key=f"rel_{ri}", use_container_width=True):
-                        play(r["url"], r["title"])
+                        play(r["url"], r["title"], r["channel"])
                     st.write("")
             except Exception:
                 st.caption("관련 영상을 불러오지 못했어.")
