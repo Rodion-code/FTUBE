@@ -259,38 +259,75 @@ def get_history(limit=50):
     res = sb.table("history").select("*").eq("user_id", st.session_state.user["id"]).order("watched_at", desc=True).limit(limit).execute()
     return res.data or []
 
+def analyze_title(title):
+    """제목에서 태그 추출"""
+    tags = []
+    t = title.lower()
+
+    # 장르/형식 태그
+    if any(x in t for x in ["cover", "커버", "カバー"]):
+        tags.append("cover")
+    if any(x in t for x in ["mv", "m/v", "music video", "뮤직비디오"]):
+        tags.append("mv")
+    if any(x in t for x in ["live", "라이브", "concert", "콘서트"]):
+        tags.append("live")
+    if any(x in t for x in ["feat", "ft.", "×", "x "]):
+        tags.append("collab")
+    if any(x in t for x in ["official", "오피셜"]):
+        tags.append("official")
+    if any(x in t for x in ["shorts", "short"]):
+        tags.append("shorts")
+    if any(x in t for x in ["vtuber", "버튜버", "バーチャル", "vtb"]):
+        tags.append("vtuber")
+    if any(x in t for x in ["asmr"]):
+        tags.append("asmr")
+    if any(x in t for x in ["remix", "리믹스"]):
+        tags.append("remix")
+
+    return tags
+
 def get_recommendations():
     from collections import Counter
-    # 불용어 필터
-    stopwords = {"이","그","저","것","수","을","를","이","가","은","는","에","의","로","으로","와","과","도","만","다","에서","하다","있다","없다","하고","했다","한","등","더","또","잘","못","안","왜","어","아","오","요"}
 
-    # 재생기록 키워드
+    stopwords = {"이","그","저","것","수","을","를","가","은","는","에","의","로","으로","와","과","도","만","다","에서","하다","있다","없다","하고","했다","한","등","더","또","잘","못","안","왜","어","아","오","요","the","a","an","in","of","to","is","on","at","by","for"}
+
     history = get_history(30)
-    hist_words = []
-    for h in history:
-        hist_words.extend([w for w in h["title"].split() if len(w) > 1 and w not in stopwords])
+    favs    = get_favorites()
+    all_titles = [h["title"] for h in history] + [f["title"] for f in favs]
 
-    # 즐겨찾기 키워드
-    favs = get_favorites()
-    fav_words = []
-    for f in favs:
-        fav_words.extend([w for w in f["title"].split() if len(w) > 1 and w not in stopwords])
-
-    # 합쳐서 겹치는 단어 우선
-    all_words = hist_words + fav_words
-    if not all_words:
+    if not all_titles:
         return [], ""
 
-    counter = Counter(all_words)
-    # 기록이랑 즐겨찾기 둘 다에 나온 단어 우선
-    hist_set = set(hist_words)
-    fav_set  = set(fav_words)
-    overlap  = hist_set & fav_set
+    # 태그 분석
+    all_tags = []
+    for t in all_titles:
+        all_tags.extend(analyze_title(t))
+
+    tag_counter = Counter(all_tags)
+    top_tags    = [t for t, _ in tag_counter.most_common(2)]
+
+    # 일반 키워드 추출
+    hist_words = []
+    for h in history:
+        hist_words.extend([w for w in h["title"].split() if len(w) > 1 and w.lower() not in stopwords])
+    fav_words = []
+    for f in favs:
+        fav_words.extend([w for w in f["title"].split() if len(w) > 1 and w.lower() not in stopwords])
+
+    all_words = hist_words + fav_words
+    counter   = Counter(all_words)
+    hist_set  = set(hist_words)
+    fav_set   = set(fav_words)
+    overlap   = hist_set & fav_set
 
     if overlap:
-        top_keyword = Counter({w: c for w, c in counter.items() if w in overlap}).most_common(1)[0][0]
+        top_keywords = [w for w, _ in Counter({w: c for w, c in counter.items() if w in overlap}).most_common(2)]
     else:
-        top_keyword = counter.most_common(1)[0][0]
+        top_keywords = [w for w, _ in counter.most_common(2)]
+
+    # 태그 + 키워드 조합
+    search_parts = top_tags + top_keywords
+    top_keyword  = " ".join(search_parts[:4])
 
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
