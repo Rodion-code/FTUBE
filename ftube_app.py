@@ -372,9 +372,14 @@ def get_recommendations():
     else:
         top_keywords = [w for w, _ in counter.most_common(2)]
 
-    # 채널 > 장르 태그 > 일반 키워드 순으로 조합 (채널이 있으면 최우선으로 검색어 앞에 옴)
-    search_parts = list(dict.fromkeys(top_channels + top_tags + top_keywords))
-    top_keyword  = " ".join(search_parts[:4])
+    # 채널 > 장르 태그 > 일반 키워드 순으로 조합.
+    # 채널을 여러 개 합치면 서로 다른 단어들이 뒤섞여 검색이 애매해지므로,
+    # 가장 많이 본 채널 "1개"만 중심으로 쓰고 태그 1개 정도만 보조로 붙임.
+    if top_channels:
+        search_parts = [top_channels[0]] + top_tags[:1]
+    else:
+        search_parts = top_tags + top_keywords
+    top_keyword = " ".join(search_parts[:2])
 
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
@@ -575,7 +580,10 @@ if st.session_state.view == "home":
                 try:
                     bonus_keyword = ""
                     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
-                    resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(query.strip())}&hl=ko&gl=KR", headers=headers)
+                    q = query.strip()
+                    # 단어가 여러 개면 정확한 구문(phrase)으로 감싸서 검색 → 관련 없는 결과가 덜 섞임
+                    search_q = f'"{q}"' if " " in q else q
+                    resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(search_q)}&hl=ko&gl=KR", headers=headers)
                     raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
                     if not raw:
                         st.error("검색 결과를 가져오지 못했어.")
