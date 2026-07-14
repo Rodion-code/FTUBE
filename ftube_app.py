@@ -260,30 +260,49 @@ def get_history(limit=50):
     return res.data or []
 
 def get_recommendations():
-    history = get_history(20)
-    if not history:
-        return []
-    # 최근 본 영상 제목에서 키워드 추출
-    keywords = []
-    for h in history[:5]:
-        words = h["title"].split()
-        keywords.extend([w for w in words if len(w) > 1])
-    if not keywords:
-        return []
-    # 가장 많이 나온 키워드로 검색
     from collections import Counter
-    top_keyword = Counter(keywords).most_common(1)[0][0]
+    # 불용어 필터
+    stopwords = {"이","그","저","것","수","을","를","이","가","은","는","에","의","로","으로","와","과","도","만","다","에서","하다","있다","없다","하고","했다","한","등","더","또","잘","못","안","왜","어","아","오","요"}
+
+    # 재생기록 키워드
+    history = get_history(30)
+    hist_words = []
+    for h in history:
+        hist_words.extend([w for w in h["title"].split() if len(w) > 1 and w not in stopwords])
+
+    # 즐겨찾기 키워드
+    favs = get_favorites()
+    fav_words = []
+    for f in favs:
+        fav_words.extend([w for w in f["title"].split() if len(w) > 1 and w not in stopwords])
+
+    # 합쳐서 겹치는 단어 우선
+    all_words = hist_words + fav_words
+    if not all_words:
+        return [], ""
+
+    counter = Counter(all_words)
+    # 기록이랑 즐겨찾기 둘 다에 나온 단어 우선
+    hist_set = set(hist_words)
+    fav_set  = set(fav_words)
+    overlap  = hist_set & fav_set
+
+    if overlap:
+        top_keyword = Counter({w: c for w, c in counter.items() if w in overlap}).most_common(1)[0][0]
+    else:
+        top_keyword = counter.most_common(1)[0][0]
+
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
         resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(top_keyword)}", headers=headers)
         raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
         if not raw:
-            return []
+            return [], top_keyword
         data = json.loads(raw[0])
         items = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]["sectionListRenderer"]["contents"][0]["itemSectionRenderer"]["contents"]
         results = []
         for item in items:
-            if "videoRenderer" in item and len(results) < 6:
+            if "videoRenderer" in item and len(results) < 12:
                 v = item["videoRenderer"]
                 vid_id   = v.get("videoId", "")
                 title    = v.get("title", {}).get("runs", [{}])[0].get("text", "")
@@ -294,7 +313,7 @@ def get_recommendations():
                 results.append({"id": vid_id, "title": title, "channel": {"name": channel}, "duration": duration, "thumbnails": [{"url": thumb}] if thumb else []})
         return results, top_keyword
     except:
-        return [], ""
+        return [], top_keyword
 
 def yt_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
