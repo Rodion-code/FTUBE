@@ -9,7 +9,6 @@ from supabase import create_client
 
 st.set_page_config(page_title="FTUBE", page_icon="▶", layout="wide")
 
-# ── Supabase 연결 ─────────────────────────────────────
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -187,7 +186,6 @@ hr { border-color: #1e2230 !important; margin: 22px 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── 헬퍼 ──────────────────────────────────────────────
 def hash_pw(pw):
     return hashlib.sha256(pw.encode()).hexdigest()
 
@@ -207,8 +205,8 @@ sinit("search_results", [])
 sinit("search_query", "")
 sinit("search_page", 1)
 sinit("search_bonus", "")
-sinit("user", None)        # 로그인한 유저 {id, username}
-sinit("auth_mode", "login")  # login / register
+sinit("user", None)
+sinit("auth_mode", "login")
 
 def get_favorites():
     if not st.session_state.user:
@@ -245,7 +243,6 @@ def play(url, title, queue=None, pos=0):
     st.session_state.view     = "player"
     st.session_state.pl_queue = queue or []
     st.session_state.pl_pos   = pos
-    # 재생기록 저장
     if st.session_state.user and url and not url.endswith(".mp4"):
         try:
             sb.table("history").insert({
@@ -263,11 +260,8 @@ def get_history(limit=50):
     return res.data or []
 
 def analyze_title(title):
-    """제목에서 태그 추출"""
     tags = []
     t = title.lower()
-
-    # 장르/형식 태그
     if any(x in t for x in ["cover", "커버", "カバー"]):
         tags.append("cover")
     if any(x in t for x in ["mv", "m/v", "music video", "뮤직비디오"]):
@@ -280,61 +274,84 @@ def analyze_title(title):
         tags.append("official")
     if any(x in t for x in ["shorts", "short"]):
         tags.append("shorts")
-    if any(x in t for x in ["vtuber", "버튜버", "バーチャル", "vtb"]):
+    if any(x in t for x in ["vtuber", "버튜버", "버츄얼", "バーチャル", "vtb"]):
         tags.append("vtuber")
     if any(x in t for x in ["asmr"]):
         tags.append("asmr")
     if any(x in t for x in ["remix", "리믹스"]):
         tags.append("remix")
-
     return tags
 
-def get_recommendations():
+def build_search_keyword(current_title=None, history_list=None, favorites_list=None):
     from collections import Counter
-
     stopwords = {"이","그","저","것","수","을","를","가","은","는","에","의","로","으로","와","과","도","만","다","에서","하다","있다","없다","하고","했다","한","등","더","또","잘","못","안","왜","어","아","오","요","the","a","an","in","of","to","is","on","at","by","for"}
-
-    history = get_history(30)
-    favs    = get_favorites()
-    all_titles = [h["title"] for h in history] + [f["title"] for f in favs]
-
-    if not all_titles:
-        return [], ""
-
-    # 태그 분석
+    
+    history_titles = [h["title"] for h in (history_list or [])]
+    fav_titles = [f["title"] for f in (favorites_list or [])]
+    all_titles = history_titles + fav_titles
+    
     all_tags = []
     for t in all_titles:
         all_tags.extend(analyze_title(t))
-
+        
+    hist_words = [w for t in history_titles for w in t.split() if len(w) > 1 and w.lower() not in stopwords]
+    fav_words = [w for t in fav_titles for w in t.split() if len(w) > 1 and w.lower() not in stopwords]
+    
+    current_tags = []
+    current_words = []
+    if current_title:
+        current_tags = analyze_title(current_title)
+        current_words = [w for w in current_title.split() if len(w) > 1 and w.lower() not in stopwords]
+        
     tag_counter = Counter(all_tags)
-    top_tags    = [t for t, _ in tag_counter.most_common(2)]
+    word_counter = Counter(hist_words + fav_words)
+    overlap_words = set(hist_words) & set(fav_words)
+    
+    final_parts = []
+    
+    for w in current_words[:2]:
+        if w.lower() not in [x.lower() for x in final_parts]:
+            final_parts.append(w)
+    for t in current_tags[:2]:
+        if t.lower() not in [x.lower() for x in final_parts]:
+            final_parts.append(t)
+            
+    for t, _ in tag_counter.most_common(3):
+        if len(final_parts) >= 4:
+            break
+        if t.lower() not in [x.lower() for x in final_parts]:
+            final_parts.append(t)
+            
+    if overlap_words:
+        overlap_counter = Counter({w: c for w, c in word_counter.items() if w in overlap_words})
+        for w, _ in overlap_counter.most_common(3):
+            if len(final_parts) >= 4:
+                break
+            if w.lower() not in [x.lower() for x in final_parts]:
+                final_parts.append(w)
+                
+    for w, _ in word_counter.most_common(5):
+        if len(final_parts) >= 4:
+            break
+        if w.lower() not in [x.lower() for x in final_parts]:
+            final_parts.append(w)
+            
+    return " ".join(final_parts[:5])
 
-    # 일반 키워드 추출
-    hist_words = []
-    for h in history:
-        hist_words.extend([w for w in h["title"].split() if len(w) > 1 and w.lower() not in stopwords])
-    fav_words = []
-    for f in favs:
-        fav_words.extend([w for w in f["title"].split() if len(w) > 1 and w.lower() not in stopwords])
-
-    all_words = hist_words + fav_words
-    counter   = Counter(all_words)
-    hist_set  = set(hist_words)
-    fav_set   = set(fav_words)
-    overlap   = hist_set & fav_set
-
-    if overlap:
-        top_keywords = [w for w, _ in Counter({w: c for w, c in counter.items() if w in overlap}).most_common(2)]
-    else:
-        top_keywords = [w for w, _ in counter.most_common(2)]
-
-    # 태그 + 키워드 조합
-    search_parts = top_tags + top_keywords
-    top_keyword  = " ".join(search_parts[:4])
-
+def get_recommendations():
+    history = get_history(30)
+    favs    = get_favorites()
+    
+    if not history and not favs:
+        return [], ""
+        
+    top_keyword = build_search_keyword(current_title=None, history_list=history, favorites_list=favs)
+    if not top_keyword:
+        return [], ""
+        
     try:
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
-        resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(top_keyword)}", headers=headers)
+        resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(top_keyword)}&hl=ko&gl=KR", headers=headers)
         raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
         if not raw:
             return [], top_keyword
@@ -363,9 +380,6 @@ def clean_tmp():
         os.unlink(st.session_state.local_tmp)
         st.session_state.local_tmp = None
 
-# ══════════════════════════════════════════════════════
-# 로그인 / 회원가입 화면
-# ══════════════════════════════════════════════════════
 if not st.session_state.user:
     st.markdown("""
     <div class="ftube-header">
@@ -432,9 +446,6 @@ if not st.session_state.user:
     st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
-# ══════════════════════════════════════════════════════
-# 헤더 (로그인 후)
-# ══════════════════════════════════════════════════════
 col_logo, col_user = st.columns([4, 1])
 with col_logo:
     st.markdown("""
@@ -453,14 +464,10 @@ with col_user:
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════
-# 홈
-# ══════════════════════════════════════════════════════
 if st.session_state.view == "home":
 
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["추천", "검색", "URL / 파일", "즐겨찾기", "플레이리스트", "기록"])
 
-    # ── 탭1: 추천 ─────────────────────────────────────
     with tab1:
         st.markdown('<div class="section-label">회원님을 위한 추천</div>', unsafe_allow_html=True)
         rec_result = get_recommendations()
@@ -495,7 +502,6 @@ if st.session_state.view == "home":
                         st.markdown('</div>', unsafe_allow_html=True)
                     st.write("")
 
-    # ── 탭2: 검색 ─────────────────────────────────────
     with tab2:
         st.markdown('<div class="section-label">YouTube 검색</div>', unsafe_allow_html=True)
         with st.form(key="search_form"):
@@ -510,7 +516,7 @@ if st.session_state.view == "home":
                 try:
                     bonus_keyword = ""
                     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
-                    resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(query.strip())}", headers=headers)
+                    resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(query.strip())}&hl=ko&gl=KR", headers=headers)
                     raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
                     if not raw:
                         st.error("검색 결과를 가져오지 못했어.")
@@ -575,7 +581,6 @@ if st.session_state.view == "home":
                     st.session_state.search_page += 1
                     st.rerun()
 
-    # ── 탭3: URL / 파일 ───────────────────────────────
     with tab3:
         st.markdown('<div class="section-label">URL로 재생</div>', unsafe_allow_html=True)
         c1, c2 = st.columns([5, 1])
@@ -609,7 +614,6 @@ if st.session_state.view == "home":
             st.session_state.local_tmp = tmp.name
             play(tmp.name, f.name)
 
-    # ── 탭4: 즐겨찾기 ─────────────────────────────────
     with tab4:
         st.markdown('<div class="section-label">저장된 영상</div>', unsafe_allow_html=True)
         favs = get_favorites()
@@ -651,7 +655,6 @@ if st.session_state.view == "home":
                         st.markdown('</div>', unsafe_allow_html=True)
                 st.write("")
 
-    # ── 탭5: 플레이리스트 ─────────────────────────────
     with tab5:
         pls = get_playlists()
 
@@ -771,7 +774,6 @@ if st.session_state.view == "home":
                         st.markdown('</div>', unsafe_allow_html=True)
                     st.write("")
 
-    # ── 탭6: 기록 ────────────────────────────────────────
     with tab6:
         st.markdown('<div class="section-label">재생 기록</div>', unsafe_allow_html=True)
         history = get_history(30)
@@ -796,15 +798,11 @@ if st.session_state.view == "home":
                     st.markdown('</div>', unsafe_allow_html=True)
                 st.write("")
 
-# ══════════════════════════════════════════════════════
-# 플레이어
-# ══════════════════════════════════════════════════════
 elif st.session_state.view == "player":
 
     queue = st.session_state.pl_queue
     pos   = st.session_state.pl_pos
 
-    # 상단 컨트롤
     r1, r2 = st.columns([1, 5])
     with r1:
         st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
@@ -839,7 +837,6 @@ elif st.session_state.view == "player":
 
     st.write("")
 
-    # 메인 레이아웃: 영상(왼쪽) + 관련영상(오른쪽)
     left_col, right_col = st.columns([3, 1])
 
     with left_col:
@@ -860,14 +857,13 @@ elif st.session_state.view == "player":
 
     with right_col:
         st.markdown('<div class="section-label">관련 영상</div>', unsafe_allow_html=True)
-        # 현재 영상 제목 기반 관련 영상 검색
         try:
             rel_title = st.session_state.title
-            tags = analyze_title(rel_title)
-            title_words = [w for w in rel_title.split() if len(w) > 1][:2]
-            rel_query = " ".join(tags[:1] + title_words)
+            history = get_history(30)
+            favs = get_favorites()
+            rel_query = build_search_keyword(current_title=rel_title, history_list=history, favorites_list=favs)
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
-            resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(rel_query)}", headers=headers)
+            resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(rel_query)}&hl=ko&gl=KR", headers=headers)
             raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
             if raw:
                 data  = json.loads(raw[0])
@@ -883,7 +879,6 @@ elif st.session_state.view == "player":
                         thumbs   = v.get("thumbnail", {}).get("thumbnails", [])
                         thumb    = thumbs[0]["url"] if thumbs else None
                         rurl     = yt_url(vid_id)
-                        # 현재 영상 제외
                         if rurl != st.session_state.url:
                             rel_results.append({"id": vid_id, "title": rtitle, "channel": channel, "duration": duration, "thumb": thumb, "url": rurl})
 
