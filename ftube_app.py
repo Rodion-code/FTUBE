@@ -241,7 +241,59 @@ def play(url, title, queue=None, pos=0):
     st.session_state.view     = "player"
     st.session_state.pl_queue = queue or []
     st.session_state.pl_pos   = pos
+    # 재생기록 저장
+    if st.session_state.user and url and not url.endswith(".mp4"):
+        try:
+            sb.table("history").insert({
+                "user_id": st.session_state.user["id"],
+                "title": title,
+                "url": url
+            }).execute()
+        except: pass
     st.rerun()
+
+def get_history(limit=50):
+    if not st.session_state.user:
+        return []
+    res = sb.table("history").select("*").eq("user_id", st.session_state.user["id"]).order("watched_at", desc=True).limit(limit).execute()
+    return res.data or []
+
+def get_recommendations():
+    history = get_history(20)
+    if not history:
+        return []
+    # 최근 본 영상 제목에서 키워드 추출
+    keywords = []
+    for h in history[:5]:
+        words = h["title"].split()
+        keywords.extend([w for w in words if len(w) > 1])
+    if not keywords:
+        return []
+    # 가장 많이 나온 키워드로 검색
+    from collections import Counter
+    top_keyword = Counter(keywords).most_common(1)[0][0]
+    try:
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+        resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(top_keyword)}", headers=headers)
+        raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
+        if not raw:
+            return []
+        data = json.loads(raw[0])
+        items = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]["sectionListRenderer"]["contents"][0]["itemSectionRenderer"]["contents"]
+        results = []
+        for item in items:
+            if "videoRenderer" in item and len(results) < 6:
+                v = item["videoRenderer"]
+                vid_id   = v.get("videoId", "")
+                title    = v.get("title", {}).get("runs", [{}])[0].get("text", "")
+                channel  = v.get("ownerText", {}).get("runs", [{}])[0].get("text", "")
+                duration = v.get("lengthText", {}).get("simpleText", "")
+                thumbs   = v.get("thumbnail", {}).get("thumbnails", [])
+                thumb    = thumbs[-1]["url"] if thumbs else None
+                results.append({"id": vid_id, "title": title, "channel": {"name": channel}, "duration": duration, "thumbnails": [{"url": thumb}] if thumb else []})
+        return results, top_keyword
+    except:
+        return [], ""
 
 def yt_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
@@ -346,10 +398,45 @@ with col_user:
 # ══════════════════════════════════════════════════════
 if st.session_state.view == "home":
 
-    tab1, tab2, tab3, tab4 = st.tabs(["검색", "URL / 파일", "즐겨찾기", "플레이리스트"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["추천", "검색", "URL / 파일", "즐겨찾기", "플레이리스트", "기록"])
 
-    # ── 탭1: 검색 ─────────────────────────────────────
+    # ── 탭1: 추천 ─────────────────────────────────────
     with tab1:
+        st.markdown('<div class="section-label">회원님을 위한 추천</div>', unsafe_allow_html=True)
+        rec_result = get_recommendations()
+        if not rec_result or not rec_result[0]:
+            st.markdown('<div class="fav-empty">영상을 몇 개 보면<br>취향에 맞는 영상을 추천해줄게.</div>', unsafe_allow_html=True)
+        else:
+            recs, keyword = rec_result
+            st.markdown(f'<div style="font-size:0.72rem;color:#3a3f52;margin-bottom:16px;">"{keyword}" 기반 추천</div>', unsafe_allow_html=True)
+            cols = st.columns(3)
+            for i, r in enumerate(recs):
+                vid_id    = r.get("id", "")
+                title     = r.get("title", "제목 없음")
+                channel   = r.get("channel", {}).get("name", "")
+                duration  = r.get("duration", "")
+                thumbs    = r.get("thumbnails", [])
+                thumb_url = thumbs[0]["url"] if thumbs else None
+                url       = yt_url(vid_id)
+                with cols[i % 3]:
+                    if thumb_url:
+                        st.markdown(f'''<div class="search-card"><img class="search-thumb" src="{thumb_url}" /><div class="search-info"><div class="search-title">{title}</div><div class="search-meta">{channel} · {duration}</div></div></div>''', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'''<div class="search-card"><div class="search-thumb-placeholder">▶</div><div class="search-info"><div class="search-title">{title}</div><div class="search-meta">{channel} · {duration}</div></div></div>''', unsafe_allow_html=True)
+                    bc, fc = st.columns([3, 1])
+                    with bc:
+                        if st.button("▶ 재생", key=f"rec_play_{i}", use_container_width=True):
+                            play(url, title)
+                    with fc:
+                        st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
+                        if st.button("☆", key=f"rec_fav_{i}", use_container_width=True):
+                            toggle_fav(title, url)
+                            st.rerun()
+                        st.markdown('</div>', unsafe_allow_html=True)
+                    st.write("")
+
+    # ── 탭2: 검색 ─────────────────────────────────────
+    with tab2:
         st.markdown('<div class="section-label">YouTube 검색</div>', unsafe_allow_html=True)
         with st.form(key="search_form"):
             s1, s2 = st.columns([5, 1])
@@ -424,8 +511,8 @@ if st.session_state.view == "home":
                     st.session_state.search_page += 1
                     st.rerun()
 
-    # ── 탭2: URL / 파일 ───────────────────────────────
-    with tab2:
+    # ── 탭3: URL / 파일 ───────────────────────────────
+    with tab3:
         st.markdown('<div class="section-label">URL로 재생</div>', unsafe_allow_html=True)
         c1, c2 = st.columns([5, 1])
         with c1:
@@ -458,8 +545,8 @@ if st.session_state.view == "home":
             st.session_state.local_tmp = tmp.name
             play(tmp.name, f.name)
 
-    # ── 탭3: 즐겨찾기 ─────────────────────────────────
-    with tab3:
+    # ── 탭4: 즐겨찾기 ─────────────────────────────────
+    with tab4:
         st.markdown('<div class="section-label">저장된 영상</div>', unsafe_allow_html=True)
         favs = get_favorites()
         if not favs:
@@ -500,8 +587,8 @@ if st.session_state.view == "home":
                         st.markdown('</div>', unsafe_allow_html=True)
                 st.write("")
 
-    # ── 탭4: 플레이리스트 ─────────────────────────────
-    with tab4:
+    # ── 탭5: 플레이리스트 ─────────────────────────────
+    with tab5:
         pls = get_playlists()
 
         if st.session_state.pl_open is not None:
@@ -619,6 +706,31 @@ if st.session_state.view == "home":
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
                     st.write("")
+
+    # ── 탭6: 기록 ────────────────────────────────────────
+    with tab6:
+        st.markdown('<div class="section-label">재생 기록</div>', unsafe_allow_html=True)
+        history = get_history(30)
+        if not history:
+            st.markdown('<div class="fav-empty">아직 재생 기록이 없어.</div>', unsafe_allow_html=True)
+        else:
+            if st.button("기록 전체 삭제", key="clear_history"):
+                sb.table("history").delete().eq("user_id", st.session_state.user["id"]).execute()
+                st.rerun()
+            st.write("")
+            for idx, h in enumerate(history):
+                st.markdown(f"""<div class="fav-card"><div class="fav-title">{h['title']}</div><div class="fav-url">{h['watched_at'][:10]} · {h['url'][:50]}...</div></div>""", unsafe_allow_html=True)
+                hc1, hc2 = st.columns([3, 1])
+                with hc1:
+                    if st.button("▶ 재생", key=f"hist_play_{idx}", use_container_width=True):
+                        play(h["url"], h["title"])
+                with hc2:
+                    st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
+                    if st.button("삭제", key=f"hist_del_{idx}", use_container_width=True):
+                        sb.table("history").delete().eq("id", h["id"]).execute()
+                        st.rerun()
+                    st.markdown('</div>', unsafe_allow_html=True)
+                st.write("")
 
 # ══════════════════════════════════════════════════════
 # 플레이어
