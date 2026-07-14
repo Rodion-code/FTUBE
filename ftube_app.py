@@ -173,6 +173,9 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
 .pl-item-url { font-size: 0.68rem; color: #3a3f52; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .player-wrap { background: #13181f; border: 1px solid #1e2230; border-radius: 12px; overflow: hidden; padding: 22px; }
+.rel-card { margin-bottom: 4px; }
+.rel-title { font-size: 0.78rem; font-weight: 500; color: #c8d0e8; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 3px; }
+.rel-meta { font-size: 0.68rem; color: #3a3f52; margin-bottom: 6px; }
 .player-title { font-size: 1rem; font-weight: 500; color: #d4d8e2; margin-top: 18px; line-height: 1.45; }
 .player-sub { font-size: 0.73rem; color: #2e3450; margin-top: 6px; }
 
@@ -801,6 +804,7 @@ elif st.session_state.view == "player":
     queue = st.session_state.pl_queue
     pos   = st.session_state.pl_pos
 
+    # 상단 컨트롤
     r1, r2 = st.columns([1, 5])
     with r1:
         st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
@@ -835,17 +839,65 @@ elif st.session_state.view == "player":
 
     st.write("")
 
-    st.markdown('<div class="player-wrap">', unsafe_allow_html=True)
-    try:
-        st.video(st.session_state.url)
-        st.markdown(f'<div class="player-title">{st.session_state.title}</div>', unsafe_allow_html=True)
-        st.markdown('<div class="player-sub">FTUBE · 광고 없음</div>', unsafe_allow_html=True)
-    except Exception as e:
-        st.error(f"재생할 수 없는 URL이야: {e}")
-        st.write("")
-        st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-        if st.button("홈으로", use_container_width=False):
-            st.session_state.view = "home"
-            st.rerun()
+    # 메인 레이아웃: 영상(왼쪽) + 관련영상(오른쪽)
+    left_col, right_col = st.columns([3, 1])
+
+    with left_col:
+        st.markdown('<div class="player-wrap">', unsafe_allow_html=True)
+        try:
+            st.video(st.session_state.url)
+            st.markdown(f'<div class="player-title">{st.session_state.title}</div>', unsafe_allow_html=True)
+            st.markdown('<div class="player-sub">FTUBE · 광고 없음</div>', unsafe_allow_html=True)
+        except Exception as e:
+            st.error(f"재생할 수 없는 URL이야: {e}")
+            st.write("")
+            st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
+            if st.button("홈으로", use_container_width=False):
+                st.session_state.view = "home"
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+
+    with right_col:
+        st.markdown('<div class="section-label">관련 영상</div>', unsafe_allow_html=True)
+        # 현재 영상 제목 기반 관련 영상 검색
+        try:
+            rel_title = st.session_state.title
+            tags = analyze_title(rel_title)
+            title_words = [w for w in rel_title.split() if len(w) > 1][:2]
+            rel_query = " ".join(tags[:1] + title_words)
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
+            resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(rel_query)}", headers=headers)
+            raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
+            if raw:
+                data  = json.loads(raw[0])
+                items = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]["sectionListRenderer"]["contents"][0]["itemSectionRenderer"]["contents"]
+                rel_results = []
+                for item in items:
+                    if "videoRenderer" in item and len(rel_results) < 8:
+                        v        = item["videoRenderer"]
+                        vid_id   = v.get("videoId", "")
+                        rtitle   = v.get("title", {}).get("runs", [{}])[0].get("text", "")
+                        channel  = v.get("ownerText", {}).get("runs", [{}])[0].get("text", "")
+                        duration = v.get("lengthText", {}).get("simpleText", "")
+                        thumbs   = v.get("thumbnail", {}).get("thumbnails", [])
+                        thumb    = thumbs[0]["url"] if thumbs else None
+                        rurl     = yt_url(vid_id)
+                        # 현재 영상 제외
+                        if rurl != st.session_state.url:
+                            rel_results.append({"id": vid_id, "title": rtitle, "channel": channel, "duration": duration, "thumb": thumb, "url": rurl})
+
+                for ri, r in enumerate(rel_results):
+                    thumb_html = f'<img src="{r["thumb"]}" style="width:100%;border-radius:6px;margin-bottom:6px;">' if r["thumb"] else '<div style="width:100%;aspect-ratio:16/9;background:#1e2230;border-radius:6px;margin-bottom:6px;"></div>'
+                    st.markdown(f'''
+                    <div class="rel-card">
+                        {thumb_html}
+                        <div class="rel-title">{r["title"]}</div>
+                        <div class="rel-meta">{r["channel"]} · {r["duration"]}</div>
+                    </div>
+                    ''', unsafe_allow_html=True)
+                    if st.button("▶", key=f"rel_{ri}", use_container_width=True):
+                        play(r["url"], r["title"])
+                    st.write("")
+        except Exception as e:
+            st.caption("관련 영상을 불러오지 못했어.")
