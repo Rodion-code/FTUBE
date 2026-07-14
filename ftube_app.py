@@ -449,24 +449,9 @@ if st.session_state.view == "home":
         if search_btn and query.strip():
             with st.spinner("검색 중..."):
                 try:
-                    # 재생기록 기반 키워드 추출해서 검색어 보강
-                    history = get_history(10)
                     bonus_keyword = ""
-                    if history:
-                        from collections import Counter
-                        words = []
-                        for h in history[:5]:
-                            words.extend([w for w in h["title"].split() if len(w) > 1])
-                        if words:
-                            top = Counter(words).most_common(3)
-                            # 검색어랑 겹치지 않는 키워드만 추가
-                            for w, _ in top:
-                                if w not in query.strip():
-                                    bonus_keyword = w
-                                    break
-                    final_query = (query.strip() + " " + bonus_keyword).strip()
                     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
-                    resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(final_query)}", headers=headers)
+                    resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(query.strip())}", headers=headers)
                     raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
                     if not raw:
                         st.error("검색 결과를 가져오지 못했어.")
