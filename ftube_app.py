@@ -176,8 +176,8 @@ html, body, [data-testid="stAppViewContainer"], .stApp {
 .player-title { font-size: 1rem; font-weight: 500; color: #d4d8e2; margin-top: 18px; line-height: 1.45; }
 .player-sub { font-size: 0.73rem; color: #2e3450; margin-top: 6px; }
 
-.auth-wrap { max-width: 400px; margin: 60px auto; background: #161b27; border: 1px solid #1e2230; border-radius: 12px; padding: 32px; }
-.auth-title { font-size: 1.1rem; font-weight: 600; color: #e8ecf4; margin-bottom: 24px; text-align: center; }
+.auth-wrap { max-width: 360px; margin: 20px auto; background: #161b27; border: 1px solid #1e2230; border-radius: 12px; padding: 24px; }
+.auth-title { font-size: 1rem; font-weight: 600; color: #e8ecf4; margin-bottom: 16px; text-align: center; }
 
 hr { border-color: #1e2230 !important; margin: 22px 0 !important; }
 [data-testid="stHorizontalBlock"] { gap: 10px !important; }
