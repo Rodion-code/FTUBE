@@ -4,7 +4,9 @@ import os
 import json
 import requests
 import re
+import html
 import hashlib
+import bcrypt
 from supabase import create_client
 
 st.set_page_config(page_title="FTUBE", page_icon="▶", layout="wide")
@@ -189,7 +191,26 @@ hr { border-color: #1e2230 !important; margin: 22px 0 !important; }
 
 # ── 헬퍼 ──────────────────────────────────────────────
 def hash_pw(pw):
-    return hashlib.sha256(pw.encode()).hexdigest()
+    """bcrypt로 솔트를 포함해 해시 (단순 SHA256보다 안전함)"""
+    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+
+def verify_pw(pw, stored_hash):
+    """저장된 bcrypt 해시와 입력 비밀번호 비교"""
+    try:
+        return bcrypt.checkpw(pw.encode(), stored_hash.encode())
+    except (ValueError, AttributeError):
+        return False
+
+def is_legacy_sha256(stored_hash):
+    """예전 SHA256(솔트 없음) 해시인지 판별 - bcrypt 해시는 항상 $2b$ 등으로 시작함"""
+    return bool(stored_hash) and not stored_hash.startswith(("$2a$", "$2b$", "$2y$"))
+
+def verify_legacy_pw(pw, stored_hash):
+    return hashlib.sha256(pw.encode()).hexdigest() == stored_hash
+
+def e(text):
+    """HTML에 삽입되는 사용자 입력값 이스케이프 (XSS 방지)"""
+    return html.escape(str(text)) if text is not None else ""
 
 def sinit(k, v):
     if k not in st.session_state:
@@ -253,7 +274,8 @@ def play(url, title, queue=None, pos=0):
                 "title": title,
                 "url": url
             }).execute()
-        except: pass
+        except Exception:
+            pass  # 기록 저장 실패는 재생 자체를 막지 않음
     st.rerun()
 
 def get_history(limit=50):
@@ -352,7 +374,7 @@ def get_recommendations():
                 thumb    = thumbs[-1]["url"] if thumbs else None
                 results.append({"id": vid_id, "title": title, "channel": {"name": channel}, "duration": duration, "thumbnails": [{"url": thumb}] if thumb else []})
         return results, top_keyword
-    except:
+    except Exception:
         return [], top_keyword
 
 def yt_url(video_id):
@@ -384,12 +406,25 @@ if not st.session_state.user:
             submitted = st.form_submit_button("로그인", use_container_width=True)
             if submitted:
                 if username and password:
-                    res = sb.table("users").select("*").eq("username", username).eq("password", hash_pw(password)).execute()
-                    if res.data:
-                        st.session_state.user = {"id": res.data[0]["id"], "username": res.data[0]["username"]}
-                        st.rerun()
-                    else:
+                    res = sb.table("users").select("*").eq("username", username).execute()
+                    if not res.data:
                         st.error("아이디 또는 비밀번호가 틀렸어.")
+                    else:
+                        stored = res.data[0]["password"]
+                        ok = False
+                        if is_legacy_sha256(stored):
+                            # 예전 SHA256 해시 유저 → 검증 성공하면 bcrypt로 재해시해서 마이그레이션
+                            if verify_legacy_pw(password, stored):
+                                ok = True
+                                sb.table("users").update({"password": hash_pw(password)}).eq("id", res.data[0]["id"]).execute()
+                        else:
+                            ok = verify_pw(password, stored)
+
+                        if ok:
+                            st.session_state.user = {"id": res.data[0]["id"], "username": res.data[0]["username"]}
+                            st.rerun()
+                        else:
+                            st.error("아이디 또는 비밀번호가 틀렸어.")
                 else:
                     st.warning("아이디와 비밀번호를 입력해줘.")
 
@@ -446,7 +481,7 @@ with col_logo:
 with col_user:
     st.write("")
     st.write("")
-    st.markdown(f'<div class="header-user">👤 {st.session_state.user["username"]}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="header-user">👤 {e(st.session_state.user["username"])}</div>', unsafe_allow_html=True)
     st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
     if st.button("로그아웃", use_container_width=True):
         st.session_state.user = None
@@ -468,7 +503,7 @@ if st.session_state.view == "home":
             st.markdown('<div class="fav-empty">영상을 몇 개 보면<br>취향에 맞는 영상을 추천해줄게.</div>', unsafe_allow_html=True)
         else:
             recs, keyword = rec_result
-            st.markdown(f'<div style="font-size:0.72rem;color:#3a3f52;margin-bottom:16px;">"{keyword}" 기반 추천</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="font-size:0.72rem;color:#3a3f52;margin-bottom:16px;">"{e(keyword)}" 기반 추천</div>', unsafe_allow_html=True)
             cols = st.columns(3)
             for i, r in enumerate(recs):
                 vid_id    = r.get("id", "")
@@ -480,9 +515,9 @@ if st.session_state.view == "home":
                 url       = yt_url(vid_id)
                 with cols[i % 3]:
                     if thumb_url:
-                        st.markdown(f'''<div class="search-card"><img class="search-thumb" src="{thumb_url}" /><div class="search-info"><div class="search-title">{title}</div><div class="search-meta">{channel} · {duration}</div></div></div>''', unsafe_allow_html=True)
+                        st.markdown(f'''<div class="search-card"><img class="search-thumb" src="{e(thumb_url)}" /><div class="search-info"><div class="search-title">{e(title)}</div><div class="search-meta">{e(channel)} · {e(duration)}</div></div></div>''', unsafe_allow_html=True)
                     else:
-                        st.markdown(f'''<div class="search-card"><div class="search-thumb-placeholder">▶</div><div class="search-info"><div class="search-title">{title}</div><div class="search-meta">{channel} · {duration}</div></div></div>''', unsafe_allow_html=True)
+                        st.markdown(f'''<div class="search-card"><div class="search-thumb-placeholder">▶</div><div class="search-info"><div class="search-title">{e(title)}</div><div class="search-meta">{e(channel)} · {e(duration)}</div></div></div>''', unsafe_allow_html=True)
                     bc, fc = st.columns([3, 1])
                     with bc:
                         if st.button("▶ 재생", key=f"rec_play_{i}", use_container_width=True):
@@ -538,7 +573,7 @@ if st.session_state.view == "home":
         if st.session_state.search_results:
             st.write("")
             if st.session_state.search_bonus:
-                st.markdown(f'<div style="font-size:0.72rem;color:#3a3f52;margin-bottom:12px;">🎯 "{st.session_state.search_bonus}" 키워드 반영됨</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="font-size:0.72rem;color:#3a3f52;margin-bottom:12px;">🎯 "{e(st.session_state.search_bonus)}" 키워드 반영됨</div>', unsafe_allow_html=True)
             page    = st.session_state.search_page
             visible = st.session_state.search_results[:page * 9]
             cols    = st.columns(3)
@@ -553,9 +588,9 @@ if st.session_state.view == "home":
 
                 with cols[i % 3]:
                     if thumb_url:
-                        st.markdown(f'''<div class="search-card"><img class="search-thumb" src="{thumb_url}" /><div class="search-info"><div class="search-title">{title}</div><div class="search-meta">{channel} · {duration}</div></div></div>''', unsafe_allow_html=True)
+                        st.markdown(f'''<div class="search-card"><img class="search-thumb" src="{e(thumb_url)}" /><div class="search-info"><div class="search-title">{e(title)}</div><div class="search-meta">{e(channel)} · {e(duration)}</div></div></div>''', unsafe_allow_html=True)
                     else:
-                        st.markdown(f'''<div class="search-card"><div class="search-thumb-placeholder">▶</div><div class="search-info"><div class="search-title">{title}</div><div class="search-meta">{channel} · {duration}</div></div></div>''', unsafe_allow_html=True)
+                        st.markdown(f'''<div class="search-card"><div class="search-thumb-placeholder">▶</div><div class="search-info"><div class="search-title">{e(title)}</div><div class="search-meta">{e(channel)} · {e(duration)}</div></div></div>''', unsafe_allow_html=True)
 
                     bc, fc = st.columns([3, 1])
                     with bc:
@@ -632,7 +667,7 @@ if st.session_state.view == "home":
                             st.rerun()
                         st.markdown('</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown(f"""<div class="fav-card"><div class="fav-title">{fv['title']}</div><div class="fav-url">{fv['url'][:70]}{'...' if len(fv['url']) > 70 else ''}</div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="fav-card"><div class="fav-title">{e(fv['title'])}</div><div class="fav-url">{e(fv['url'][:70])}{'...' if len(fv['url']) > 70 else ''}</div></div>""", unsafe_allow_html=True)
                     pc, ec, dc = st.columns([3, 1, 1])
                     with pc:
                         if st.button("▶ 재생", key=f"fp_{idx}", use_container_width=True):
@@ -671,7 +706,7 @@ if st.session_state.view == "home":
             st.markdown('</div>', unsafe_allow_html=True)
 
             st.write("")
-            st.markdown(f'<div class="section-label">{pld["name"]}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="section-label">{e(pld["name"])}</div>', unsafe_allow_html=True)
 
             if items:
                 if st.button("▶ 전체 재생", key="pl_play_all", use_container_width=False):
@@ -680,7 +715,7 @@ if st.session_state.view == "home":
             st.write("")
 
             for ii, item in enumerate(items):
-                st.markdown(f"""<div class="pl-item"><div class="pl-item-title">{ii+1}. {item['title']}</div><div class="pl-item-url">{item['url'][:65]}{'...' if len(item['url']) > 65 else ''}</div></div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="pl-item"><div class="pl-item-title">{ii+1}. {e(item['title'])}</div><div class="pl-item-url">{e(item['url'][:65])}{'...' if len(item['url']) > 65 else ''}</div></div>""", unsafe_allow_html=True)
                 ia, ib, ic = st.columns([3, 1, 1])
                 with ia:
                     if st.button("▶ 재생", key=f"pli_play_{ii}", use_container_width=True):
@@ -734,7 +769,7 @@ if st.session_state.view == "home":
                 for fi, fv in enumerate(favs):
                     fa, fb = st.columns([4, 1])
                     with fa:
-                        st.markdown(f'<div style="font-size:0.82rem;color:#8890aa;padding:6px 0">{fv["title"]}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div style="font-size:0.82rem;color:#8890aa;padding:6px 0">{e(fv["title"])}</div>', unsafe_allow_html=True)
                     with fb:
                         st.markdown('<div class="btn-sm">', unsafe_allow_html=True)
                         if st.button("추가", key=f"fav_to_pl_{fi}", use_container_width=True):
@@ -757,7 +792,7 @@ if st.session_state.view == "home":
             else:
                 for pl in pls:
                     items = json.loads(pl["items"] or "[]")
-                    st.markdown(f"""<div class="pl-card"><div class="pl-name">{pl['name']}</div><div class="pl-count">{len(items)}개 영상</div></div>""", unsafe_allow_html=True)
+                    st.markdown(f"""<div class="pl-card"><div class="pl-name">{e(pl['name'])}</div><div class="pl-count">{len(items)}개 영상</div></div>""", unsafe_allow_html=True)
                     oa, ob = st.columns([3, 1])
                     with oa:
                         if st.button("열기", key=f"pl_open_{pl['id']}", use_container_width=True):
@@ -783,7 +818,7 @@ if st.session_state.view == "home":
                 st.rerun()
             st.write("")
             for idx, h in enumerate(history):
-                st.markdown(f"""<div class="fav-card"><div class="fav-title">{h['title']}</div><div class="fav-url">{h['watched_at'][:10]} · {h['url'][:50]}...</div></div>""", unsafe_allow_html=True)
+                st.markdown(f"""<div class="fav-card"><div class="fav-title">{e(h['title'])}</div><div class="fav-url">{e(h['watched_at'][:10])} · {e(h['url'][:50])}...</div></div>""", unsafe_allow_html=True)
                 hc1, hc2 = st.columns([3, 1])
                 with hc1:
                     if st.button("▶ 재생", key=f"hist_play_{idx}", use_container_width=True):
@@ -846,7 +881,7 @@ elif st.session_state.view == "player":
         st.markdown('<div class="player-wrap">', unsafe_allow_html=True)
         try:
             st.video(st.session_state.url)
-            st.markdown(f'<div class="player-title">{st.session_state.title}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="player-title">{e(st.session_state.title)}</div>', unsafe_allow_html=True)
             st.markdown('<div class="player-sub">FTUBE · 광고 없음</div>', unsafe_allow_html=True)
         except Exception as e:
             st.error(f"재생할 수 없는 URL이야: {e}")
@@ -906,12 +941,12 @@ elif st.session_state.view == "player":
                             rel_results.append({"id": vid_id, "title": rtitle, "channel": channel, "duration": duration, "thumb": thumb, "url": rurl})
 
                 for ri, r in enumerate(rel_results):
-                    thumb_html = f'<img src="{r["thumb"]}" style="width:100%;border-radius:6px;margin-bottom:6px;">' if r["thumb"] else '<div style="width:100%;aspect-ratio:16/9;background:#1e2230;border-radius:6px;margin-bottom:6px;"></div>'
+                    thumb_html = f'<img src="{e(r["thumb"])}" style="width:100%;border-radius:6px;margin-bottom:6px;">' if r["thumb"] else '<div style="width:100%;aspect-ratio:16/9;background:#1e2230;border-radius:6px;margin-bottom:6px;"></div>'
                     st.markdown(f'''
                     <div class="rel-card">
                         {thumb_html}
-                        <div class="rel-title">{r["title"]}</div>
-                        <div class="rel-meta">{r["channel"]} · {r["duration"]}</div>
+                        <div class="rel-title">{e(r["title"])}</div>
+                        <div class="rel-meta">{e(r["channel"])} · {e(r["duration"])}</div>
                     </div>
                     ''', unsafe_allow_html=True)
                     if st.button("▶", key=f"rel_{ri}", use_container_width=True):
