@@ -906,7 +906,23 @@ elif st.session_state.view == "player":
     with left_col:
         st.markdown('<div class="player-wrap">', unsafe_allow_html=True)
         try:
-            st.video(st.session_state.url)
+            player_url = st.session_state.url
+            # 유튜브 URL이면 iframe 임베드로 재생 (st.video는 엉뚱한 영상 나오는 버그 있음)
+            yt_match = re.search(r'(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})', player_url)
+            if yt_match:
+                vid_id_embed = yt_match.group(1)
+                st.markdown(f'''
+                <iframe
+                    width="100%" height="420"
+                    src="https://www.youtube.com/embed/{vid_id_embed}?autoplay=1"
+                    frameborder="0"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowfullscreen
+                    style="border-radius:8px;">
+                </iframe>
+                ''', unsafe_allow_html=True)
+            else:
+                st.video(player_url)
             st.markdown(f'<div class="player-title">{st.session_state.title}</div>', unsafe_allow_html=True)
             st.markdown('<div class="player-sub">FTUBE · 광고 없음</div>', unsafe_allow_html=True)
         except Exception as e:
@@ -928,23 +944,17 @@ elif st.session_state.view == "player":
 
             rel_title = st.session_state.title
 
-            # 현재 영상 태그
+            # 현재 영상에서 의미있는 단어 추출 (stopwords 제거, 1글자 제거)
+            cur_words = [w for w in rel_title.split() if len(w) > 1 and w.lower() not in stopwords]
+
+            # 현재 영상 태그 (cover, mv, live 등 장르/형식)
             cur_tags = analyze_title(rel_title)
-            cur_words = [w for w in rel_title.split() if len(w) > 1 and w.lower() not in stopwords][:2]
 
-            # 재생기록 + 즐겨찾기 태그
-            history = get_history(20)
-            favs    = get_favorites()
-            all_titles = [h["title"] for h in history] + [f["title"] for f in favs]
-            hist_tags = []
-            for t in all_titles:
-                hist_tags.extend(analyze_title(t))
-            tag_counter = Counter(hist_tags)
-            top_hist_tags = [t for t, _ in tag_counter.most_common(2)]
-
-            # 현재 영상 태그 우선, 기록 태그 보조
-            combined_tags = list(dict.fromkeys(cur_tags + top_hist_tags))[:2]
-            rel_query = " ".join(combined_tags + cur_words)
+            # 핵심 쿼리: 아티스트명/제목 단어를 최대한 많이 포함 (최대 4단어)
+            # 태그(cover 등)는 쿼리 뒤에 보조로만 붙임
+            core_words = cur_words[:4]
+            tag_suffix = cur_tags[:1]  # 태그 최대 1개만, 뒤에 붙임
+            rel_query = " ".join(core_words + tag_suffix)
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
             resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(rel_query)}&hl=ko&gl=KR", headers=headers)
             raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
