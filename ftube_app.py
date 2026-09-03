@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import tempfile
 import os
@@ -5,221 +6,532 @@ import json
 import requests
 import re
 import hashlib
+import random
+import time
+from collections import Counter
 from supabase import create_client
 
-st.set_page_config(page_title="FTUBE", page_icon="▶", layout="wide")
+# ── 페이지 설정 ─────────────────────────────────────
+st.set_page_config(page_title="FTUBE - MP3 Player", page_icon="🎵", layout="wide")
 
 # ── Supabase 연결 ─────────────────────────────────────
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-html, body, [data-testid="stAppViewContainer"], .stApp {
-    background-color: #111318 !important;
-    color: #d4d8e2;
-    font-family: 'Inter', sans-serif;
-}
-[data-testid="stAppViewContainer"] > .main {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 0 28px;
-}
-[data-testid="block-container"] {
-    padding: 28px 0 60px 0 !important;
-    max-width: 100% !important;
-}
-.ftube-header {
-    padding: 22px 0 18px 0;
-    border-bottom: 1px solid #1e2230;
-    margin-bottom: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-.ftube-logo { font-size: 1rem; font-weight: 700; letter-spacing: 0.18em; color: #e8ecf4; }
-.ftube-logo span { color: #5b8af5; }
-.header-sub { font-size: 0.7rem; color: #3a3f52; letter-spacing: 0.1em; }
-.header-user { font-size: 0.78rem; color: #5b8af5; }
-
-[data-testid="stTabs"] [role="tablist"] {
-    border-bottom: 1px solid #1e2230 !important;
-    gap: 8px !important;
-    background: transparent !important;
-}
-[data-testid="stTabs"] button[role="tab"] {
-    background: transparent !important;
-    color: #4a5068 !important;
-    font-family: 'Inter', sans-serif !important;
-    font-size: 0.85rem !important;
-    font-weight: 500 !important;
-    letter-spacing: 0.06em !important;
-    padding: 12px 32px !important;
-    border: none !important;
-    border-bottom: 2px solid transparent !important;
-    border-radius: 0 !important;
-    transition: color 0.2s !important;
-    min-width: 100px !important;
-}
-[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
-    color: #c8d0e8 !important;
-    border-bottom: 2px solid #5b8af5 !important;
-    background: transparent !important;
-}
-[data-testid="stTabs"] button[role="tab"]:hover { color: #8890aa !important; }
-[data-testid="stTabContent"] { padding-top: 28px !important; }
-
-.section-label {
-    font-size: 0.65rem;
-    font-weight: 600;
-    letter-spacing: 0.16em;
-    color: #3a3f52;
-    text-transform: uppercase;
-    margin-bottom: 14px;
-}
-
-.stTextInput input {
-    background-color: #161b27 !important;
-    border: 1px solid #1e2230 !important;
-    border-radius: 8px !important;
-    color: #d4d8e2 !important;
-    padding: 11px 16px !important;
-    font-family: 'Inter', sans-serif !important;
-    font-size: 0.87rem !important;
-    width: 100% !important;
-    transition: border-color 0.2s !important;
-}
-.stTextInput input:focus {
-    border-color: #5b8af5 !important;
-    box-shadow: 0 0 0 3px rgba(91,138,245,0.08) !important;
-    outline: none !important;
-}
-.stTextInput input::placeholder { color: #3a3f52 !important; }
-
-.stButton button {
-    font-family: 'Inter', sans-serif !important;
-    font-size: 0.82rem !important;
-    font-weight: 500 !important;
-    border-radius: 8px !important;
-    cursor: pointer !important;
-    transition: all 0.15s !important;
-    letter-spacing: 0.03em !important;
-    width: 100% !important;
-    background-color: #5b8af5 !important;
-    color: #fff !important;
-    border: none !important;
-    padding: 10px 18px !important;
-}
-.stButton button:hover { background-color: #4a79e4 !important; }
-
-.btn-ghost button {
-    background-color: transparent !important;
-    border: 1px solid #1e2230 !important;
-    color: #4a5068 !important;
-    padding: 8px 14px !important;
-}
-.btn-ghost button:hover {
-    border-color: #2e3450 !important;
-    color: #8890aa !important;
-    background-color: #161b27 !important;
-}
-.btn-fav button {
-    background-color: transparent !important;
-    border: 1px solid #1e2230 !important;
-    color: #5b8af5 !important;
-    padding: 8px 14px !important;
-}
-.btn-fav button:hover { background-color: #161b27 !important; border-color: #2e3450 !important; }
-.btn-sm button {
-    background-color: transparent !important;
-    border: 1px solid #1e2230 !important;
-    color: #4a5068 !important;
-    padding: 5px 10px !important;
-    font-size: 0.75rem !important;
-}
-.btn-sm button:hover { color: #8890aa !important; background-color: #161b27 !important; }
-
-.search-card {
-    background: #161b27;
-    border: 1px solid #1e2230;
-    border-radius: 10px;
-    overflow: hidden;
-    transition: border-color 0.2s, transform 0.15s;
-}
-.search-card:hover { border-color: #2e3450; transform: translateY(-2px); }
-.search-thumb { width: 100%; aspect-ratio: 16/9; object-fit: cover; display: block; }
-.search-thumb-placeholder { width: 100%; aspect-ratio: 16/9; background: #1e2230; display: flex; align-items: center; justify-content: center; font-size: 2rem; }
-.search-info { padding: 12px 14px 14px; }
-.search-title { font-size: 0.83rem; font-weight: 500; color: #c8d0e8; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 6px; min-height: 2.4em; }
-.search-meta { font-size: 0.7rem; color: #3a3f52; }
-
-.fav-card { background: #161b27; border: 1px solid #1e2230; border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; }
-.fav-card:hover { border-color: #2e3450; }
-.fav-title { font-size: 0.85rem; color: #c8d0e8; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fav-url { font-size: 0.7rem; color: #3a3f52; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fav-empty { text-align: center; padding: 52px 0; color: #2e3450; font-size: 0.82rem; line-height: 1.8; }
-
-.pl-card { background: #161b27; border: 1px solid #1e2230; border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; }
-.pl-card:hover { border-color: #2e3450; }
-.pl-name { font-size: 0.88rem; color: #c8d0e8; font-weight: 500; }
-.pl-count { font-size: 0.72rem; color: #3a3f52; margin-top: 3px; }
-.pl-item { background: #13181f; border: 1px solid #1e2230; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; }
-.pl-item-title { font-size: 0.82rem; color: #c8d0e8; }
-.pl-item-url { font-size: 0.68rem; color: #3a3f52; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.player-wrap { background: #13181f; border: 1px solid #1e2230; border-radius: 12px; overflow: hidden; padding: 22px; }
-.rel-card { margin-bottom: 4px; }
-.rel-title { font-size: 0.78rem; font-weight: 500; color: #c8d0e8; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-bottom: 3px; }
-.rel-meta { font-size: 0.68rem; color: #3a3f52; margin-bottom: 6px; }
-.player-title { font-size: 1rem; font-weight: 500; color: #d4d8e2; margin-top: 18px; line-height: 1.45; }
-.player-sub { font-size: 0.73rem; color: #2e3450; margin-top: 6px; }
-
-.auth-wrap { max-width: 360px; margin: 20px auto; background: #161b27; border: 1px solid #1e2230; border-radius: 12px; padding: 24px; }
-.auth-title { font-size: 1rem; font-weight: 600; color: #e8ecf4; margin-bottom: 16px; text-align: center; }
-
-hr { border-color: #1e2230 !important; margin: 22px 0 !important; }
-[data-testid="stHorizontalBlock"] { gap: 10px !important; }
-</style>
-""", unsafe_allow_html=True)
-
-# ── 헬퍼 ──────────────────────────────────────────────
-def hash_pw(pw):
-    return hashlib.sha256(pw.encode()).hexdigest()
-
+# ── 세션 상태 초기화 ─────────────────────────────────────
 def sinit(k, v):
     if k not in st.session_state:
         st.session_state[k] = v
 
-sinit("view", "home")
+sinit("user", None)
+sinit("auth_mode", "login")
 sinit("url", "")
 sinit("title", "")
-sinit("local_tmp", None)
-sinit("edit_fav_idx", None)
-sinit("pl_open", None)
-sinit("pl_queue", [])
-sinit("pl_pos", 0)
+sinit("artist", "")
+sinit("is_playing", False)
+sinit("queue", [])
+sinit("q_pos", 0)
+sinit("shuffle", False)
+sinit("repeat_mode", "all")
 sinit("search_results", [])
 sinit("search_query", "")
-sinit("search_page", 1)
-sinit("search_bonus", "")
-sinit("user", None)        # 로그인한 유저 {id, username}
-sinit("auth_mode", "login")  # login / register
+sinit("show_queue_drawer", False)
+sinit("show_lyrics_drawer", False)
+sinit("show_theme_selector", False)
+sinit("current_lyrics", None)
+sinit("lcd_theme", "green")  # green, amber, cyan, purple, ruby
+
+# ── LCD 테마 팔레트 정의 ──────────────────────────────
+THEMES = {
+    "green": {
+        "name": "🟢 Matrix Green (클래식 그린)",
+        "bg": "#060e0a",
+        "border": "#1a3d24",
+        "glow": "rgba(57, 211, 83, 0.4)",
+        "text": "#56d364",
+        "text_sub": "#7ee787",
+        "lyrics_box": "#030805",
+        "lyrics_text": "#79c0ff",
+        "eq1": "#238636",
+        "eq2": "#39d353",
+        "accent": "#39d353",
+    },
+    "amber": {
+        "name": "🟠 Retro Amber (진공관 엠버 오렌지)",
+        "bg": "#120904",
+        "border": "#422006",
+        "glow": "rgba(251, 191, 36, 0.45)",
+        "text": "#fbbf24",
+        "text_sub": "#fcd34d",
+        "lyrics_box": "#0a0502",
+        "lyrics_text": "#fde68a",
+        "eq1": "#d97706",
+        "eq2": "#f59e0b",
+        "accent": "#f59e0b",
+    },
+    "cyan": {
+        "name": "🔵 Cyber Ice (사이버네틱 아이스 블루)",
+        "bg": "#040d14",
+        "border": "#0e3a59",
+        "glow": "rgba(56, 189, 248, 0.45)",
+        "text": "#38bdf8",
+        "text_sub": "#7dd3fc",
+        "lyrics_box": "#02070b",
+        "lyrics_text": "#a5f3fc",
+        "eq1": "#0284c7",
+        "eq2": "#38bdf8",
+        "accent": "#38bdf8",
+    },
+    "purple": {
+        "name": "🟣 Midnight Neon (미드나잇 베이퍼 퍼플)",
+        "bg": "#0e0514",
+        "border": "#3b1154",
+        "glow": "rgba(192, 132, 252, 0.45)",
+        "text": "#c084fc",
+        "text_sub": "#e879f9",
+        "lyrics_box": "#08020c",
+        "lyrics_text": "#f0abfc",
+        "eq1": "#9333ea",
+        "eq2": "#c084fc",
+        "accent": "#c084fc",
+    },
+    "ruby": {
+        "name": "🔴 Stealth Ruby (스텔스 다크 루비)",
+        "bg": "#140507",
+        "border": "#451016",
+        "glow": "rgba(244, 63, 94, 0.45)",
+        "text": "#fb7185",
+        "text_sub": "#fda4af",
+        "lyrics_box": "#0b0204",
+        "lyrics_text": "#fecdd3",
+        "eq1": "#e11d48",
+        "eq2": "#f43f5e",
+        "accent": "#f43f5e",
+    },
+}
+
+cur_th = THEMES.get(st.session_state.lcd_theme, THEMES["green"])
+
+# ── CSS & 테마별 MP3 기기 스타일 디자인 시스템 ─────────────────────
+st.markdown(f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Share+Tech+Mono&display=swap');
+
+:root {{
+    --lcd-bg: {cur_th['bg']};
+    --lcd-border: {cur_th['border']};
+    --lcd-glow: {cur_th['glow']};
+    --lcd-text: {cur_th['text']};
+    --lcd-sub: {cur_th['text_sub']};
+    --lcd-lbox: {cur_th['lyrics_box']};
+    --lcd-ltext: {cur_th['lyrics_text']};
+    --lcd-eq1: {cur_th['eq1']};
+    --lcd-eq2: {cur_th['eq2']};
+    --lcd-acc: {cur_th['accent']};
+}}
+
+* {{ box-sizing: border-box; margin: 0; padding: 0; }}
+
+html, body, [data-testid="stAppViewContainer"], .stApp {{
+    background-color: #0d1017 !important;
+    color: #c9d1d9;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}}
+[data-testid="stAppViewContainer"] > .main {{
+    max-width: 1060px;
+    margin: 0 auto;
+    padding: 0 20px;
+}}
+[data-testid="block-container"] {{
+    padding: 20px 0 60px 0 !important;
+    max-width: 100% !important;
+}}
+
+/* ── 상단 헤더 ── */
+.ftube-header {{
+    padding: 16px 20px;
+    background: linear-gradient(135deg, #161b26 0%, #11141c 100%);
+    border: 1px solid #21283b;
+    border-radius: 12px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}}
+.ftube-logo-wrap {{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}}
+.ftube-logo {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: #58a6ff;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}}
+.ftube-logo span {{ color: var(--lcd-acc); }}
+.header-badge {{
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    background: #1f293d;
+    color: #79c0ff;
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid #384666;
+    letter-spacing: 0.05em;
+}}
+.header-user {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: #8b949e;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}}
+.header-user b {{ color: #58a6ff; }}
+
+/* ── MP3 하드웨어 플레이어 덱 (DAP LCD & Deck) ── */
+.mp3-device-deck {{
+    background: linear-gradient(180deg, #1a202c 0%, #121620 100%);
+    border: 2px solid #2d3748;
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 12px 36px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
+    position: relative;
+}}
+.mp3-device-deck::before {{
+    content: "DIGITAL AUDIO PLAYER // MP3-DAP PRO // THEMED LCD";
+    position: absolute;
+    top: 8px;
+    left: 24px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    color: #4a5568;
+    letter-spacing: 0.18em;
+}}
+.mp3-lcd-screen {{
+    background: var(--lcd-bg) !important;
+    border: 2px solid var(--lcd-border) !important;
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-top: 10px;
+    margin-bottom: 20px;
+    position: relative;
+    box-shadow: inset 0 0 24px var(--lcd-glow), 0 2px 8px rgba(0,0,0,0.8);
+    overflow: hidden;
+    transition: all 0.3s ease;
+}}
+.mp3-lcd-screen::after {{
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.15) 0px, rgba(0,0,0,0.15) 1px, transparent 1px, transparent 2px);
+    pointer-events: none;
+}}
+.lcd-top-bar {{
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px dashed var(--lcd-border);
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+}}
+.lcd-status-playing {{
+    color: var(--lcd-acc);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    animation: blink 1.5s infinite;
+}}
+.lcd-status-idle {{ color: #486551; }}
+.lcd-meta-badge {{ color: #58a6ff; letter-spacing: 0.1em; }}
+.lcd-codec {{ color: #e3b341; letter-spacing: 0.08em; }}
+
+.lcd-main-info {{
+    margin: 10px 0;
+}}
+.lcd-track-title {{
+    font-family: 'Share Tech Mono', 'Inter', monospace;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--lcd-text) !important;
+    text-shadow: 0 0 10px var(--lcd-glow);
+    letter-spacing: 0.05em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 4px;
+}}
+.lcd-artist-name {{
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.88rem;
+    color: var(--lcd-sub) !important;
+    letter-spacing: 0.08em;
+}}
+
+/* ── LCD 실시간 가사 텔레프롬프터 ── */
+.lcd-lyrics-box {{
+    background: var(--lcd-lbox) !important;
+    border: 1px solid var(--lcd-border) !important;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 12px 0 8px 0;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}}
+.lcd-lyrics-text {{
+    font-family: 'Share Tech Mono', 'Inter', monospace;
+    font-size: 0.92rem;
+    color: var(--lcd-ltext) !important;
+    text-shadow: 0 0 8px var(--lcd-glow);
+    letter-spacing: 0.06em;
+    line-height: 1.4;
+    animation: fadeIn 0.4s ease-in;
+}}
+
+/* EQ 비주얼라이저 바 애니메이션 */
+.lcd-eq-wrap {{
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 20px;
+    margin: 10px 0 4px 0;
+}}
+.lcd-eq-bar {{
+    flex: 1;
+    background: var(--lcd-eq1);
+    border-radius: 2px 2px 0 0;
+    height: 30%;
+}}
+.lcd-eq-bar.active:nth-child(1) {{ animation: eq1 0.7s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(2) {{ animation: eq2 0.5s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(3) {{ animation: eq3 0.8s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(4) {{ animation: eq4 0.6s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(5) {{ animation: eq5 0.9s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(6) {{ animation: eq2 0.4s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(7) {{ animation: eq4 0.7s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(8) {{ animation: eq1 0.6s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(9) {{ animation: eq3 0.5s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(10) {{ animation: eq5 0.8s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(11) {{ animation: eq2 0.7s ease-in-out infinite alternate; }}
+.lcd-eq-bar.active:nth-child(12) {{ animation: eq4 0.9s ease-in-out infinite alternate; }}
+
+@keyframes eq1 {{ 0% {{ height: 20%; background: var(--lcd-eq1); }} 100% {{ height: 95%; background: var(--lcd-eq2); }} }}
+@keyframes eq2 {{ 0% {{ height: 40%; background: var(--lcd-eq1); }} 100% {{ height: 80%; background: var(--lcd-eq2); }} }}
+@keyframes eq3 {{ 0% {{ height: 15%; background: var(--lcd-eq1); }} 100% {{ height: 100%; background: var(--lcd-eq2); }} }}
+@keyframes eq4 {{ 0% {{ height: 50%; background: var(--lcd-eq1); }} 100% {{ height: 70%; background: var(--lcd-eq2); }} }}
+@keyframes eq5 {{ 0% {{ height: 10%; background: var(--lcd-eq1); }} 100% {{ height: 90%; background: var(--lcd-eq2); }} }}
+@keyframes blink {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.3; }} }}
+@keyframes fadeIn {{ from {{ opacity: 0; transform: translateY(4px); }} to {{ opacity: 1; transform: translateY(0); }} }}
+
+/* 완전 숨김 유튜브 오디오 엔진 (영상이 절대 보이지 않음) */
+.hidden-audio-frame {{
+    position: absolute !important;
+    left: -9999px !important;
+    top: -9999px !important;
+    width: 1px !important;
+    height: 1px !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    visibility: hidden !important;
+}}
+
+/* ── 탭 메뉴 ── */
+[data-testid="stTabs"] [role="tablist"] {{
+    border-bottom: 1px solid #21283b !important;
+    gap: 6px !important;
+    background: transparent !important;
+}}
+[data-testid="stTabs"] button[role="tab"] {{
+    background: #11151f !important;
+    color: #6e7681 !important;
+    font-family: 'JetBrains Mono', monospace !important;
+    font-size: 0.82rem !important;
+    font-weight: 500 !important;
+    padding: 10px 18px !important;
+    border: 1px solid #1f2638 !important;
+    border-bottom: 2px solid transparent !important;
+    border-radius: 8px 8px 0 0 !important;
+    transition: all 0.2s !important;
+}}
+[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
+    color: var(--lcd-acc) !important;
+    border-color: #384666 !important;
+    border-bottom: 2px solid var(--lcd-acc) !important;
+    background: #161c2b !important;
+}}
+[data-testid="stTabs"] button[role="tab"]:hover {{
+    color: #c9d1d9 !important;
+    background: #181f2f !important;
+}}
+[data-testid="stTabContent"] {{ padding-top: 20px !important; }}
+
+/* ── 트랙 리스트 바 (영상 썸네일 대신 텍스트/음악 중심 행) ── */
+.track-row {{
+    background: #131722;
+    border: 1px solid #1e2638;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.15s ease;
+}}
+.track-row:hover {{
+    background: #181e2c;
+    border-color: #384666;
+    transform: translateX(2px);
+}}
+.track-left {{
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    overflow: hidden;
+    flex: 1;
+}}
+.track-num {{
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--lcd-acc);
+    min-width: 28px;
+}}
+.track-info {{
+    overflow: hidden;
+    flex: 1;
+}}
+.track-title-text {{
+    font-size: 0.88rem;
+    font-weight: 500;
+    color: #e6edf3;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 2px;
+}}
+.track-artist-text {{
+    font-size: 0.75rem;
+    color: #8b949e;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}}
+.track-tag-badge {{
+    display: inline-block;
+    font-size: 0.65rem;
+    font-family: 'Share Tech Mono', monospace;
+    background: #1f293d;
+    color: #79c0ff;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-right: 6px;
+}}
+.track-duration {{
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    color: #6e7681;
+    margin-left: 10px;
+    margin-right: 14px;
+}}
+
+/* ── 폼 & 버튼 스타일 ── */
+.stTextInput input {{
+    background-color: #131722 !important;
+    border: 1px solid #21283b !important;
+    border-radius: 8px !important;
+    color: #e6edf3 !important;
+    padding: 10px 14px !important;
+    font-size: 0.88rem !important;
+}}
+.stTextInput input:focus {{
+    border-color: #58a6ff !important;
+    box-shadow: 0 0 0 2px rgba(88,166,255,0.15) !important;
+}}
+.stButton button {{
+    font-family: 'Inter', -apple-system, sans-serif !important;
+    font-size: 0.8rem !important;
+    font-weight: 500 !important;
+    border-radius: 8px !important;
+    border: 1px solid #21283b !important;
+    background: #181f2f !important;
+    color: #c9d1d9 !important;
+    padding: 8px 14px !important;
+    transition: all 0.15s !important;
+}}
+.stButton button:hover {{
+    background: #212b40 !important;
+    border-color: #384666 !important;
+    color: #ffffff !important;
+}}
+.btn-primary button {{
+    background: #1f6feb !important;
+    border-color: #388bfd !important;
+    color: #ffffff !important;
+}}
+.btn-primary button:hover {{
+    background: #388bfd !important;
+}}
+.btn-fav button {{
+    color: #e3b341 !important;
+    border-color: #384666 !important;
+}}
+
+.auth-card {{
+    max-width: 380px;
+    margin: 40px auto;
+    background: #131722;
+    border: 1px solid #21283b;
+    border-radius: 12px;
+    padding: 28px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}}
+.auth-title {{
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #e6edf3;
+    margin-bottom: 20px;
+    text-align: center;
+    letter-spacing: 0.05em;
+}}
+.empty-msg {{
+    text-align: center;
+    padding: 48px 0;
+    color: #484f58;
+    font-size: 0.85rem;
+    font-family: 'Share Tech Mono', monospace;
+    line-height: 1.8;
+}}
+.section-title {{
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    color: #58a6ff;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+}}
+</style>
+""", unsafe_allow_html=True)
+
+# ── 유틸리티 및 Supabase 연동 함수 ──────────────────────────
+def hash_pw(pw):
+    return hashlib.sha256(pw.encode()).hexdigest()
 
 def get_favorites():
     if not st.session_state.user:
         return []
-    res = sb.table("favorites").select("*").eq("user_id", st.session_state.user["id"]).execute()
-    return res.data or []
-
-def get_playlists():
-    if not st.session_state.user:
-        return []
-    res = sb.table("playlists").select("*").eq("user_id", st.session_state.user["id"]).execute()
+    res = sb.table("favorites").select("*").eq("user_id", st.session_state.user["id"]).order("id", desc=True).execute()
     return res.data or []
 
 def toggle_fav(title, url):
@@ -233,28 +545,17 @@ def toggle_fav(title, url):
         sb.table("favorites").insert({"user_id": uid, "title": title, "url": url}).execute()
 
 def is_fav(url):
-    if not st.session_state.user:
+    if not st.session_state.user or not url:
         return False
     uid = st.session_state.user["id"]
     res = sb.table("favorites").select("id").eq("user_id", uid).eq("url", url).execute()
     return bool(res.data)
 
-def play(url, title, queue=None, pos=0):
-    st.session_state.url      = url
-    st.session_state.title    = title
-    st.session_state.view     = "player"
-    st.session_state.pl_queue = queue or []
-    st.session_state.pl_pos   = pos
-    # 재생기록 저장
-    if st.session_state.user and url and not url.endswith(".mp4"):
-        try:
-            sb.table("history").insert({
-                "user_id": st.session_state.user["id"],
-                "title": title,
-                "url": url
-            }).execute()
-        except: pass
-    st.rerun()
+def get_playlists():
+    if not st.session_state.user:
+        return []
+    res = sb.table("playlists").select("*").eq("user_id", st.session_state.user["id"]).order("id", desc=True).execute()
+    return res.data or []
 
 def get_history(limit=50):
     if not st.session_state.user:
@@ -262,138 +563,227 @@ def get_history(limit=50):
     res = sb.table("history").select("*").eq("user_id", st.session_state.user["id"]).order("watched_at", desc=True).limit(limit).execute()
     return res.data or []
 
-def analyze_title(title):
-    """제목에서 태그 추출"""
-    tags = []
-    t = title.lower()
-
-    # 장르/형식 태그
-    if any(x in t for x in ["cover", "커버", "カバー"]):
-        tags.append("cover")
-    if any(x in t for x in ["mv", "m/v", "music video", "뮤직비디오"]):
-        tags.append("mv")
-    if any(x in t for x in ["live", "라이브", "concert", "콘서트"]):
-        tags.append("live")
-    if any(x in t for x in ["feat", "ft.", "×", "x "]):
-        tags.append("collab")
-    if any(x in t for x in ["official", "오피셜"]):
-        tags.append("official")
-    if any(x in t for x in ["shorts", "short"]):
-        tags.append("shorts")
-    if any(x in t for x in ["vtuber", "버튜버", "バーチャル", "vtb"]):
-        tags.append("vtuber")
-    if any(x in t for x in ["asmr"]):
-        tags.append("asmr")
-    if any(x in t for x in ["remix", "리믹스"]):
-        tags.append("remix")
-
-    return tags
-
 def get_keywords():
     if not st.session_state.user:
         return []
     res = sb.table("keywords").select("*").eq("user_id", st.session_state.user["id"]).execute()
     return res.data or []
 
-def get_recommendations():
-    from collections import Counter
-
-    stopwords = {"이","그","저","것","수","을","를","가","은","는","에","의","로","으로","와","과","도","만","다","에서","하다","있다","없다","하고","했다","한","등","더","또","잘","못","안","왜","어","아","오","요","the","a","an","in","of","to","is","on","at","by","for"}
-
-    history = get_history(30)
-    favs    = get_favorites()
-    all_titles = [h["title"] for h in history] + [f["title"] for f in favs]
-
-    # 사용자 지정 키워드 우선
-    user_keywords = get_keywords()
-    if user_keywords:
-        top_keyword = " ".join([k["keyword"] for k in user_keywords[:3]])
-        try:
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
-            resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(top_keyword)}&hl=ko&gl=KR", headers=headers)
-            raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
-            if raw:
-                data  = json.loads(raw[0])
-                items = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]["sectionListRenderer"]["contents"][0]["itemSectionRenderer"]["contents"]
-                results = []
-                for item in items:
-                    if "videoRenderer" in item and len(results) < 12:
-                        v = item["videoRenderer"]
-                        vid_id   = v.get("videoId", "")
-                        title    = v.get("title", {}).get("runs", [{}])[0].get("text", "")
-                        channel  = v.get("ownerText", {}).get("runs", [{}])[0].get("text", "")
-                        duration = v.get("lengthText", {}).get("simpleText", "")
-                        thumbs   = v.get("thumbnail", {}).get("thumbnails", [])
-                        thumb    = thumbs[-1]["url"] if thumbs else None
-                        results.append({"id": vid_id, "title": title, "channel": {"name": channel}, "duration": duration, "thumbnails": [{"url": thumb}] if thumb else []})
-                return results, top_keyword
-        except:
-            pass
-
-    if not all_titles:
-        return [], ""
-
-    # 태그 분석
-    all_tags = []
-    for t in all_titles:
-        all_tags.extend(analyze_title(t))
-
-    tag_counter = Counter(all_tags)
-    top_tags    = [t for t, _ in tag_counter.most_common(2)]
-
-    # 일반 키워드 추출
-    hist_words = []
-    for h in history:
-        hist_words.extend([w for w in h["title"].split() if len(w) > 1 and w.lower() not in stopwords])
-    fav_words = []
-    for f in favs:
-        fav_words.extend([w for w in f["title"].split() if len(w) > 1 and w.lower() not in stopwords])
-
-    all_words = hist_words + fav_words
-    counter   = Counter(all_words)
-    hist_set  = set(hist_words)
-    fav_set   = set(fav_words)
-    overlap   = hist_set & fav_set
-
-    if overlap:
-        top_keywords = [w for w, _ in Counter({w: c for w, c in counter.items() if w in overlap}).most_common(2)]
-    else:
-        top_keywords = [w for w, _ in counter.most_common(2)]
-
-    # 태그 + 키워드 조합
-    search_parts = top_tags + top_keywords
-    top_keyword  = " ".join(search_parts[:4])
-
-    try:
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
-        resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(top_keyword)}&hl=ko&gl=KR", headers=headers)
-        raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
-        if not raw:
-            return [], top_keyword
-        data = json.loads(raw[0])
-        items = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]["sectionListRenderer"]["contents"][0]["itemSectionRenderer"]["contents"]
-        results = []
-        for item in items:
-            if "videoRenderer" in item and len(results) < 12:
-                v = item["videoRenderer"]
-                vid_id   = v.get("videoId", "")
-                title    = v.get("title", {}).get("runs", [{}])[0].get("text", "")
-                channel  = v.get("ownerText", {}).get("runs", [{}])[0].get("text", "")
-                duration = v.get("lengthText", {}).get("simpleText", "")
-                thumbs   = v.get("thumbnail", {}).get("thumbnails", [])
-                thumb    = thumbs[-1]["url"] if thumbs else None
-                results.append({"id": vid_id, "title": title, "channel": {"name": channel}, "duration": duration, "thumbnails": [{"url": thumb}] if thumb else []})
-        return results, top_keyword
-    except:
-        return [], top_keyword
-
 def yt_url(video_id):
     return f"https://www.youtube.com/watch?v={video_id}"
 
-def clean_tmp():
-    if st.session_state.local_tmp and os.path.exists(st.session_state.local_tmp):
-        os.unlink(st.session_state.local_tmp)
-        st.session_state.local_tmp = None
+# ── 스마트 제목 & 아티스트 파서 ─────────────────────────
+def analyze_title(title):
+    tags = []
+    t = title.lower()
+    if any(x in t for x in ["cover", "커버", "歌ってみた", "우타이테"]): tags.append("COVER")
+    if any(x in t for x in ["official", "원곡", "mv", "m/v", "music video"]): tags.append("ORIGINAL")
+    if any(x in t for x in ["live", "라이브", "concert", "콘서트"]): tags.append("LIVE")
+    if any(x in t for x in ["remix", "리믹스", "mix"]): tags.append("REMIX")
+    if any(x in t for x in ["lofi", "로파이", "bgm", "chill"]): tags.append("BGM")
+    if any(x in t for x in ["asmr", "acoustic", "어쿠스틱"]): tags.append("ACOUSTIC")
+    return tags
+
+def smart_parse_title(raw_title):
+    cleaned = raw_title.strip()
+    tags = analyze_title(cleaned)
+    clean_text = re.sub(r'[\[【\(\「『].*?[\]】\)\」』]', '', cleaned).strip()
+    
+    cov = re.search(r'^(.*?)\s*(?:covered\s+by|cover\s+by|vocal\s+by|song\s+by)\s*(.*?)$', clean_text, re.IGNORECASE)
+    if cov:
+        return {"artist": cov.group(2).strip() or "Artist", "song": cov.group(1).strip() or raw_title, "tags": tags}
+    
+    parts = re.split(r'[-–—/|:~]', clean_text)
+    parts = [p.strip() for p in parts if p.strip()]
+    if len(parts) >= 2:
+        artist_candidate = re.sub(r'(?i)\b(cover|커버|live|official|mv|full|ver)\b', '', parts[0]).strip()
+        song_candidate = re.sub(r'(?i)\b(cover|커버|live|official|mv|full|ver)\b', '', parts[1]).strip()
+        if artist_candidate and song_candidate:
+            return {"artist": artist_candidate, "song": song_candidate, "tags": tags}
+        return {"artist": parts[0], "song": parts[1], "tags": tags}
+    
+    return {"artist": "Audio Track", "song": clean_text or raw_title, "tags": tags}
+
+# ── 글로벌 실시간 가사 수집 엔진 (LRCLIB API 연동) ────────────
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_lyrics(song, artist):
+    if not song or song == "STANDBY MODE" or song == "NO TRACK LOADED":
+        return None
+    try:
+        r = requests.get("https://lrclib.net/api/get", params={"track_name": song, "artist_name": artist}, timeout=3)
+        if r.status_code == 200:
+            data = r.json()
+            synced = data.get("syncedLyrics")
+            plain = data.get("plainLyrics")
+            if synced or plain:
+                return {"synced": synced, "plain": plain, "track": song, "artist": artist}
+        
+        q = f"{song} {artist}".strip()
+        r2 = requests.get("https://lrclib.net/api/search", params={"q": q}, timeout=3)
+        if r2.status_code == 200:
+            results = r2.json()
+            if results and isinstance(results, list):
+                first = results[0]
+                return {"synced": first.get("syncedLyrics"), "plain": first.get("plainLyrics"), "track": song, "artist": artist}
+    except Exception:
+        pass
+    return None
+
+def parse_lrc_lines(synced_text):
+    if not synced_text:
+        return []
+    lines = []
+    for line in synced_text.splitlines():
+        m = re.match(r'\[(\d{2}):(\d{2}\.\d{2,3})\](.*)', line)
+        if m:
+            mins = int(m.group(1))
+            secs = float(m.group(2))
+            total_sec = mins * 60 + secs
+            text = m.group(3).strip()
+            if text:
+                lines.append({"sec": total_sec, "text": text})
+    return lines
+
+# ── YouTube 크롤링 검색 엔진 (오디오 트랙 전용) ─────────────
+@st.cache_data(ttl=300, show_spinner=False)
+def search_youtube_raw(query, max_items=25):
+    if not query or not query.strip():
+        return []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+    url = f"https://www.youtube.com/results?search_query={requests.utils.quote(query.strip())}&hl=ko&gl=KR"
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code != 200: return []
+        patterns = [
+            r'var ytInitialData\s*=\\s*({.+?});</script>',
+            r'window\["ytInitialData"\]\s*=\s*({.+?});',
+            r'ytInitialData\s*=\s*({.+?});'
+        ]
+        raw_json = None
+        for pat in patterns:
+            m = re.search(pat, resp.text)
+            if m:
+                try:
+                    raw_json = json.loads(m.group(1))
+                    break
+                except: continue
+        if not raw_json: return []
+        
+        results = []
+        seen_ids = set()
+        def extract(obj):
+            if isinstance(obj, dict):
+                if "videoRenderer" in obj:
+                    v = obj["videoRenderer"]
+                    vid_id = v.get("videoId", "")
+                    if vid_id and len(vid_id) == 11 and vid_id not in seen_ids:
+                        seen_ids.add(vid_id)
+                        title_runs = v.get("title", {}).get("runs", [])
+                        title = title_runs[0].get("text", "Untitled") if title_runs else v.get("title", {}).get("simpleText", "Untitled")
+                        owner_runs = v.get("ownerText", {}).get("runs", [])
+                        channel = owner_runs[0].get("text", "") if owner_runs else ""
+                        duration = v.get("lengthText", {}).get("simpleText", "")
+                        parsed = smart_parse_title(title)
+                        artist = parsed["artist"] if parsed["artist"] != "Audio Track" else (channel or "Unknown Artist")
+                        results.append({
+                            "id": vid_id,
+                            "raw_title": title,
+                            "title": parsed["song"],
+                            "artist": artist,
+                            "tags": parsed["tags"],
+                            "channel": channel,
+                            "duration": duration,
+                            "url": yt_url(vid_id)
+                        })
+                for _, val in obj.items():
+                    if len(results) >= max_items: break
+                    extract(val)
+            elif isinstance(obj, list):
+                for item in obj:
+                    if len(results) >= max_items: break
+                    extract(item)
+        extract(raw_json)
+        return results
+    except:
+        return []
+
+# ── 추천 엔진 ─────────────────────────────────────────
+def get_recommendations():
+    stopwords = {"이","그","저","것","수","을","를","가","은","는","에","의","로","으로","와","과","도","만","다","에서","하다","있다","없다","하고","했다","한","등","the","a","an","in","of","to","is","on","at","by","for"}
+    history = get_history(30)
+    favs = get_favorites()
+    all_titles = [h["title"] for h in history] + [f["title"] for f in favs]
+
+    user_keywords = get_keywords()
+    if user_keywords:
+        top_keyword = " ".join([k["keyword"] for k in user_keywords[:3]])
+        results = search_youtube_raw(top_keyword, max_items=12)
+        if results: return results, top_keyword
+
+    if not all_titles:
+        return search_youtube_raw("잔잔한 음악 플레이리스트", max_items=12), "인기 음악 추천"
+
+    words = []
+    for t in all_titles:
+        words.extend([w for w in t.split() if len(w) > 1 and w.lower() not in stopwords])
+    top_words = [w for w, _ in Counter(words).most_common(2)]
+    keyword = " ".join(top_words) if top_words else "음악"
+    results = search_youtube_raw(f"{keyword} 노래", max_items=12)
+    return results, keyword
+
+# ── 재생 제어 함수 ─────────────────────────────────────
+def play_track(track, queue_list=None, pos=0):
+    st.session_state.url = track["url"]
+    st.session_state.title = track.get("title") or track.get("raw_title", "Track")
+    st.session_state.artist = track.get("artist", "Unknown Artist")
+    st.session_state.is_playing = True
+    
+    st.session_state.current_lyrics = fetch_lyrics(st.session_state.title, st.session_state.artist)
+    
+    if queue_list:
+        st.session_state.queue = queue_list
+        st.session_state.q_pos = pos
+    elif not st.session_state.queue:
+        st.session_state.queue = [track]
+        st.session_state.q_pos = 0
+
+    if st.session_state.user and track["url"]:
+        try:
+            sb.table("history").insert({
+                "user_id": st.session_state.user["id"],
+                "title": f"{st.session_state.title} - {st.session_state.artist}",
+                "url": track["url"]
+            }).execute()
+        except: pass
+    st.rerun()
+
+def play_next():
+    q = st.session_state.queue
+    if not q: return
+    if st.session_state.repeat_mode == "one":
+        st.rerun()
+        return
+    if st.session_state.shuffle:
+        next_pos = random.randint(0, len(q) - 1)
+    else:
+        next_pos = st.session_state.q_pos + 1
+        if next_pos >= len(q):
+            if st.session_state.repeat_mode == "all":
+                next_pos = 0
+            else:
+                st.session_state.is_playing = False
+                st.rerun()
+                return
+    play_track(q[next_pos], queue_list=q, pos=next_pos)
+
+def play_prev():
+    q = st.session_state.queue
+    if not q: return
+    prev_pos = max(0, st.session_state.q_pos - 1)
+    play_track(q[prev_pos], queue_list=q, pos=prev_pos)
 
 # ══════════════════════════════════════════════════════
 # 로그인 / 회원가입 화면
@@ -401,592 +791,525 @@ def clean_tmp():
 if not st.session_state.user:
     st.markdown("""
     <div class="ftube-header">
-        <span class="ftube-logo">F<span>TUBE</span></span>
-        <span class="header-sub">광고 없는 플레이어</span>
+        <div class="ftube-logo-wrap">
+            <div class="ftube-logo">FTUBE<span>.MP3</span></div>
+            <div class="header-badge">HARDWARE AUDIO PLAYER</div>
+        </div>
+        <div class="header-badge">OFFLINE / AD-FREE AUDIO</div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="auth-wrap">', unsafe_allow_html=True)
-
+    st.markdown('<div class="auth-card">', unsafe_allow_html=True)
     if st.session_state.auth_mode == "login":
-        st.markdown('<div class="auth-title">로그인</div>', unsafe_allow_html=True)
+        st.markdown('<div class="auth-title">MP3 디바이스 로그인</div>', unsafe_allow_html=True)
         with st.form("login_form"):
             username = st.text_input("아이디", placeholder="아이디 입력")
             password = st.text_input("비밀번호", placeholder="비밀번호 입력", type="password")
-            submitted = st.form_submit_button("로그인", use_container_width=True)
-            if submitted:
+            sub = st.form_submit_button("로그인", use_container_width=True)
+            if sub:
                 if username and password:
                     res = sb.table("users").select("*").eq("username", username).eq("password", hash_pw(password)).execute()
                     if res.data:
                         st.session_state.user = {"id": res.data[0]["id"], "username": res.data[0]["username"]}
                         st.rerun()
                     else:
-                        st.error("아이디 또는 비밀번호가 틀렸어.")
+                        st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
                 else:
-                    st.warning("아이디와 비밀번호를 입력해줘.")
-
+                    st.warning("아이디와 비밀번호를 입력해주세요.")
         st.write("")
-        st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-        if st.button("계정이 없어? 회원가입", use_container_width=True):
+        if st.button("계정 생성 (회원가입)", use_container_width=True):
             st.session_state.auth_mode = "register"
             st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
     else:
-        st.markdown('<div class="auth-title">회원가입</div>', unsafe_allow_html=True)
-        with st.form("register_form"):
+        st.markdown('<div class="auth-title">새 계정 등록</div>', unsafe_allow_html=True)
+        with st.form("reg_form"):
             username = st.text_input("아이디", placeholder="사용할 아이디")
             password = st.text_input("비밀번호", placeholder="비밀번호", type="password")
             password2 = st.text_input("비밀번호 확인", placeholder="비밀번호 재입력", type="password")
-            submitted = st.form_submit_button("가입하기", use_container_width=True)
-            if submitted:
+            sub = st.form_submit_button("가입하기", use_container_width=True)
+            if sub:
                 if not username or not password:
-                    st.warning("아이디와 비밀번호를 입력해줘.")
+                    st.warning("모든 정보를 입력해주세요.")
                 elif password != password2:
-                    st.error("비밀번호가 일치하지 않아.")
+                    st.error("비밀번호가 일치하지 않습니다.")
                 else:
-                    existing = sb.table("users").select("id").eq("username", username).execute()
-                    if existing.data:
-                        st.error("이미 있는 아이디야.")
+                    ex = sb.table("users").select("id").eq("username", username).execute()
+                    if ex.data:
+                        st.error("이미 존재하는 아이디입니다.")
                     else:
                         sb.table("users").insert({"username": username, "password": hash_pw(password)}).execute()
-                        st.success("가입 완료! 로그인해봐.")
+                        st.success("가입이 완료되었습니다.")
                         st.session_state.auth_mode = "login"
                         st.rerun()
-
         st.write("")
-        st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-        if st.button("이미 계정 있어? 로그인", use_container_width=True):
+        if st.button("로그인 화면으로", use_container_width=True):
             st.session_state.auth_mode = "login"
             st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
     st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 # ══════════════════════════════════════════════════════
-# 헤더 (로그인 후)
+# 메인 헤더
 # ══════════════════════════════════════════════════════
-col_logo, col_user = st.columns([4, 1])
-with col_logo:
-    st.markdown("""
+col_h1, col_h2 = st.columns([4, 1.2])
+with col_h1:
+    st.markdown(f"""
     <div class="ftube-header">
-        <span class="ftube-logo">F<span>TUBE</span></span>
-        <span class="header-sub">광고 없는 플레이어</span>
+        <div class="ftube-logo-wrap">
+            <div class="ftube-logo">FTUBE<span>.DAP</span></div>
+            <div class="header-badge">THEME: {st.session_state.lcd_theme.upper()}</div>
+        </div>
+        <div class="header-user">USER: <b>{st.session_state.user['username']}</b></div>
     </div>
     """, unsafe_allow_html=True)
-with col_user:
+with col_h2:
     st.write("")
-    st.write("")
-    st.markdown(f'<div class="header-user">👤 {st.session_state.user["username"]}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
     if st.button("로그아웃", use_container_width=True):
         st.session_state.user = None
         st.rerun()
+
+# ══════════════════════════════════════════════════════
+# MP3 하드웨어 오디오 기기 덱 (실시간 가사 & 테마형 LCD 스크린)
+# ══════════════════════════════════════════════════════
+cur_title = st.session_state.title or "NO TRACK LOADED"
+cur_artist = st.session_state.artist or "STANDBY MODE"
+is_act = st.session_state.is_playing and bool(st.session_state.url)
+q_len = len(st.session_state.queue)
+cur_pos_display = f"{st.session_state.q_pos + 1:02d}/{q_len:02d}" if q_len else "00/00"
+status_label = "▶ PLAYING" if is_act else "■ STANDBY"
+status_class = "lcd-status-playing" if is_act else "lcd-status-idle"
+eq_active = "active" if is_act else ""
+
+# 가사 텍스트 준비
+lyrics_data = st.session_state.current_lyrics or fetch_lyrics(cur_title, cur_artist)
+lrc_display = "♪ (INSTRUMENTAL / NO LYRICS FOUND) ♪"
+if lyrics_data:
+    if lyrics_data.get("synced"):
+        parsed_lines = parse_lrc_lines(lyrics_data["synced"])
+        if parsed_lines:
+            lrc_display = f"♫ {parsed_lines[0]['text']}"
+    elif lyrics_data.get("plain"):
+        first_line = [l.strip() for l in lyrics_data["plain"].splitlines() if l.strip()]
+        if first_line:
+            lrc_display = f"♫ {first_line[0]}"
+
+if not is_act:
+    lrc_display = "[ STANDBY // SELECT A TRACK TO PLAY ]"
+
+# LCD 스크린 HTML 렌더링
+st.markdown(f"""
+<div class="mp3-device-deck">
+    <div class="mp3-lcd-screen">
+        <div class="lcd-top-bar">
+            <div class="{status_class}">{status_label}</div>
+            <div class="lcd-meta-badge">TRK [{cur_pos_display}]</div>
+            <div class="lcd-codec">AUDIO · 320 KBPS · STEREO</div>
+        </div>
+        <div class="lcd-main-info">
+            <div class="lcd-track-title">🎵 {cur_title}</div>
+            <div class="lcd-artist-name">ARTIST // {cur_artist}</div>
+        </div>
+        <div class="lcd-lyrics-box">
+            <div class="lcd-lyrics-text">{lrc_display}</div>
+        </div>
+        <div class="lcd-eq-wrap">
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+            <div class="lcd-eq-bar {eq_active}"></div>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ── 완전 숨김 유튜브 오디오 엔진 (영상이 절대 보이지 않고 소리만 스트리밍) ──
+if is_act and st.session_state.url:
+    yt_m = re.search(r'(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})', st.session_state.url)
+    if yt_m:
+        vid_id = yt_m.group(1)
+        st.markdown(f'''
+        <iframe
+            class="hidden-audio-frame"
+            src="https://www.youtube.com/embed/{vid_id}?autoplay=1&enablejsapi=1"
+            allow="autoplay">
+        </iframe>
+        ''', unsafe_allow_html=True)
+
+# ── MP3 하드웨어 컨트롤 버튼 덱 ──
+c_prev, c_play, c_next, c_shuf, c_rep, c_lyric, c_thm, c_fav, c_q = st.columns([1, 1.3, 1, 1, 1, 1.1, 1.2, 1, 1.2])
+with c_prev:
+    if st.button("⏮ PREV", use_container_width=True, key="d_prev"):
+        play_prev()
+with c_play:
+    play_txt = "⏸ PAUSE" if is_act else "▶ PLAY"
+    st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+    if st.button(play_txt, use_container_width=True, key="d_play"):
+        st.session_state.is_playing = not st.session_state.is_playing
+        st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
-
-# ══════════════════════════════════════════════════════
-# 홈
-# ══════════════════════════════════════════════════════
-if st.session_state.view == "home":
-
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["추천", "검색", "URL / 파일", "즐겨찾기", "플레이리스트", "기록", "키워드"])
-
-    # ── 탭1: 추천 ─────────────────────────────────────
-    with tab1:
-        st.markdown('<div class="section-label">회원님을 위한 추천</div>', unsafe_allow_html=True)
-        rec_result = get_recommendations()
-        if not rec_result or not rec_result[0]:
-            st.markdown('<div class="fav-empty">영상을 몇 개 보면<br>취향에 맞는 영상을 추천해줄게.</div>', unsafe_allow_html=True)
-        else:
-            recs, keyword = rec_result
-            st.markdown(f'<div style="font-size:0.72rem;color:#3a3f52;margin-bottom:16px;">"{keyword}" 기반 추천</div>', unsafe_allow_html=True)
-            cols = st.columns(3)
-            for i, r in enumerate(recs):
-                vid_id    = r.get("id", "")
-                title     = r.get("title", "제목 없음")
-                channel   = r.get("channel", {}).get("name", "")
-                duration  = r.get("duration", "")
-                thumbs    = r.get("thumbnails", [])
-                thumb_url = thumbs[0]["url"] if thumbs else None
-                url       = yt_url(vid_id)
-                with cols[i % 3]:
-                    if thumb_url:
-                        st.markdown(f'''<div class="search-card"><img class="search-thumb" src="{thumb_url}" /><div class="search-info"><div class="search-title">{title}</div><div class="search-meta">{channel} · {duration}</div></div></div>''', unsafe_allow_html=True)
-                    else:
-                        st.markdown(f'''<div class="search-card"><div class="search-thumb-placeholder">▶</div><div class="search-info"><div class="search-title">{title}</div><div class="search-meta">{channel} · {duration}</div></div></div>''', unsafe_allow_html=True)
-                    bc, fc = st.columns([3, 1])
-                    with bc:
-                        if st.button("▶ 재생", key=f"rec_play_{i}", use_container_width=True):
-                            play(url, title)
-                    with fc:
-                        st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
-                        if st.button("☆", key=f"rec_fav_{i}", use_container_width=True):
-                            toggle_fav(title, url)
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    st.write("")
-
-    # ── 탭2: 검색 ─────────────────────────────────────
-    with tab2:
-        st.markdown('<div class="section-label">YouTube 검색</div>', unsafe_allow_html=True)
-        with st.form(key="search_form"):
-            s1, s2 = st.columns([5, 1])
-            with s1:
-                query = st.text_input("", placeholder="검색어 입력", label_visibility="collapsed")
-            with s2:
-                search_btn = st.form_submit_button("검색", use_container_width=True)
-
-        if search_btn and query.strip():
-            with st.spinner("검색 중..."):
-                try:
-                    bonus_keyword = ""
-                    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
-                    resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(query.strip())}&hl=ko&gl=KR", headers=headers)
-                    raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
-                    if not raw:
-                        st.error("검색 결과를 가져오지 못했어.")
-                    else:
-                        data = json.loads(raw[0])
-                        items = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]["sectionListRenderer"]["contents"][0]["itemSectionRenderer"]["contents"]
-                        results = []
-                        for item in items:
-                            if "videoRenderer" in item and len(results) < 27:
-                                v = item["videoRenderer"]
-                                vid_id   = v.get("videoId", "")
-                                title    = v.get("title", {}).get("runs", [{}])[0].get("text", "제목 없음")
-                                channel  = v.get("ownerText", {}).get("runs", [{}])[0].get("text", "")
-                                duration = v.get("lengthText", {}).get("simpleText", "")
-                                thumbs   = v.get("thumbnail", {}).get("thumbnails", [])
-                                thumb    = thumbs[-1]["url"] if thumbs else None
-                                results.append({"id": vid_id, "title": title, "channel": {"name": channel}, "duration": duration, "thumbnails": [{"url": thumb}] if thumb else []})
-                        st.session_state.search_results = results
-                        st.session_state.search_query   = query.strip()
-                        st.session_state.search_page    = 1
-                        st.session_state.search_bonus   = bonus_keyword
-                except Exception as e:
-                    st.error(f"검색 실패: {e}")
-
-        if st.session_state.search_results:
-            st.write("")
-            if st.session_state.search_bonus:
-                st.markdown(f'<div style="font-size:0.72rem;color:#3a3f52;margin-bottom:12px;">🎯 "{st.session_state.search_bonus}" 키워드 반영됨</div>', unsafe_allow_html=True)
-            page    = st.session_state.search_page
-            visible = st.session_state.search_results[:page * 9]
-            cols    = st.columns(3)
-            for i, r in enumerate(visible):
-                vid_id    = r.get("id", "")
-                title     = r.get("title", "제목 없음")
-                channel   = r.get("channel", {}).get("name", "")
-                duration  = r.get("duration", "")
-                thumbs    = r.get("thumbnails", [])
-                thumb_url = thumbs[0]["url"] if thumbs else None
-                url       = yt_url(vid_id)
-
-                with cols[i % 3]:
-                    if thumb_url:
-                        st.markdown(f'''<div class="search-card"><img class="search-thumb" src="{thumb_url}" /><div class="search-info"><div class="search-title">{title}</div><div class="search-meta">{channel} · {duration}</div></div></div>''', unsafe_allow_html=True)
-                    else:
-                        st.markdown(f'''<div class="search-card"><div class="search-thumb-placeholder">▶</div><div class="search-info"><div class="search-title">{title}</div><div class="search-meta">{channel} · {duration}</div></div></div>''', unsafe_allow_html=True)
-
-                    bc, fc = st.columns([3, 1])
-                    with bc:
-                        if st.button("▶ 재생", key=f"sr_play_{i}", use_container_width=True):
-                            play(url, title)
-                    with fc:
-                        st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
-                        if st.button("☆", key=f"sr_fav_{i}", use_container_width=True):
-                            toggle_fav(title, url)
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    st.write("")
-
-            if len(st.session_state.search_results) > page * 9:
-                st.write("")
-                if st.button("더 보기", key="load_more", use_container_width=False):
-                    st.session_state.search_page += 1
-                    st.rerun()
-
-    # ── 탭3: URL / 파일 ───────────────────────────────
-    with tab3:
-        st.markdown('<div class="section-label">URL로 재생</div>', unsafe_allow_html=True)
-        c1, c2 = st.columns([5, 1])
-        with c1:
-            url_input = st.text_input("", placeholder="YouTube 링크 또는 MP4 주소 붙여넣기", label_visibility="collapsed", key="url_input")
-        with c2:
-            if st.button("재생", use_container_width=True, key="url_play"):
-                if url_input.strip():
-                    play(url_input.strip(), "외부 영상")
-                else:
-                    st.warning("URL을 입력해주세요.")
-
-        if url_input.strip():
-            ca, cb = st.columns([2, 4])
-            with ca:
-                st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
-                if st.button("☆ 즐겨찾기 추가", key="url_fav"):
-                    toggle_fav("외부 영상", url_input.strip())
-                    st.rerun()
-                st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown("---")
-        st.markdown('<div class="section-label">로컬 파일 재생</div>', unsafe_allow_html=True)
-        st.caption("mp4 파일을 올려주세요.")
-        f = st.file_uploader("", type=["mp4"], label_visibility="collapsed", key="file_up")
-        if f:
-            clean_tmp()
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
-            tmp.write(f.getvalue())
-            tmp.close()
-            st.session_state.local_tmp = tmp.name
-            play(tmp.name, f.name)
-
-    # ── 탭4: 즐겨찾기 ─────────────────────────────────
-    with tab4:
-        st.markdown('<div class="section-label">저장된 영상</div>', unsafe_allow_html=True)
-        favs = get_favorites()
-        if not favs:
-            st.markdown('<div class="fav-empty">저장된 영상이 없어.<br>☆ 버튼으로 추가해봐.</div>', unsafe_allow_html=True)
-        else:
-            for idx, fv in enumerate(favs):
-                if st.session_state.edit_fav_idx == fv["id"]:
-                    new_title = st.text_input("제목 수정", value=fv["title"], key=f"edit_title_{idx}")
-                    sc1, sc2 = st.columns([1, 1])
-                    with sc1:
-                        if st.button("저장", key=f"save_edit_{idx}", use_container_width=True):
-                            sb.table("favorites").update({"title": new_title}).eq("id", fv["id"]).execute()
-                            st.session_state.edit_fav_idx = None
-                            st.rerun()
-                    with sc2:
-                        st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-                        if st.button("취소", key=f"cancel_edit_{idx}", use_container_width=True):
-                            st.session_state.edit_fav_idx = None
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f"""<div class="fav-card"><div class="fav-title">{fv['title']}</div><div class="fav-url">{fv['url'][:70]}{'...' if len(fv['url']) > 70 else ''}</div></div>""", unsafe_allow_html=True)
-                    pc, ec, dc = st.columns([3, 1, 1])
-                    with pc:
-                        if st.button("▶ 재생", key=f"fp_{idx}", use_container_width=True):
-                            play(fv["url"], fv["title"])
-                    with ec:
-                        st.markdown('<div class="btn-sm">', unsafe_allow_html=True)
-                        if st.button("수정", key=f"edit_{idx}", use_container_width=True):
-                            st.session_state.edit_fav_idx = fv["id"]
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    with dc:
-                        st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-                        if st.button("삭제", key=f"fd_{idx}", use_container_width=True):
-                            sb.table("favorites").delete().eq("id", fv["id"]).execute()
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                st.write("")
-
-    # ── 탭5: 플레이리스트 ─────────────────────────────
-    with tab5:
-        pls = get_playlists()
-
-        if st.session_state.pl_open is not None:
-            pi  = st.session_state.pl_open
-            pld = next((p for p in pls if p["id"] == pi), None)
-            if not pld:
-                st.session_state.pl_open = None
-                st.rerun()
-
-            items = json.loads(pld["items"] or "[]")
-
-            st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-            if st.button("← 목록으로", key="pl_back", use_container_width=False):
-                st.session_state.pl_open = None
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
-            st.write("")
-            st.markdown(f'<div class="section-label">{pld["name"]}</div>', unsafe_allow_html=True)
-
-            if items:
-                if st.button("▶ 전체 재생", key="pl_play_all", use_container_width=False):
-                    play(items[0]["url"], items[0]["title"], queue=items, pos=0)
-
-            st.write("")
-
-            for ii, item in enumerate(items):
-                st.markdown(f"""<div class="pl-item"><div class="pl-item-title">{ii+1}. {item['title']}</div><div class="pl-item-url">{item['url'][:65]}{'...' if len(item['url']) > 65 else ''}</div></div>""", unsafe_allow_html=True)
-                ia, ib, ic = st.columns([3, 1, 1])
-                with ia:
-                    if st.button("▶ 재생", key=f"pli_play_{ii}", use_container_width=True):
-                        play(item["url"], item["title"], queue=items, pos=ii)
-                with ib:
-                    st.markdown('<div class="btn-sm">', unsafe_allow_html=True)
-                    if st.button("수정", key=f"pli_edit_{ii}", use_container_width=True):
-                        st.session_state[f"pli_editing_{ii}"] = True
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-                with ic:
-                    st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-                    if st.button("삭제", key=f"pli_del_{ii}", use_container_width=True):
-                        items.pop(ii)
-                        sb.table("playlists").update({"items": json.dumps(items, ensure_ascii=False)}).eq("id", pld["id"]).execute()
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-
-                if st.session_state.get(f"pli_editing_{ii}"):
-                    new_t = st.text_input("제목 수정", value=item["title"], key=f"pli_new_t_{ii}")
-                    sa, sb2 = st.columns([1, 1])
-                    with sa:
-                        if st.button("저장", key=f"pli_save_{ii}", use_container_width=True):
-                            items[ii]["title"] = new_t
-                            sb.table("playlists").update({"items": json.dumps(items, ensure_ascii=False)}).eq("id", pld["id"]).execute()
-                            st.session_state[f"pli_editing_{ii}"] = False
-                            st.rerun()
-                    with sb2:
-                        st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-                        if st.button("취소", key=f"pli_cancel_{ii}", use_container_width=True):
-                            st.session_state[f"pli_editing_{ii}"] = False
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                st.write("")
-
-            st.markdown("---")
-            st.markdown('<div class="section-label">영상 추가</div>', unsafe_allow_html=True)
-            add_url   = st.text_input("", placeholder="URL 붙여넣기", label_visibility="collapsed", key="pl_add_url")
-            add_title = st.text_input("", placeholder="제목 (선택)", label_visibility="collapsed", key="pl_add_title")
-            if st.button("추가", key="pl_add_btn", use_container_width=False):
-                if add_url.strip():
-                    t = add_title.strip() if add_title.strip() else f"영상 {len(items)+1}"
-                    items.append({"title": t, "url": add_url.strip()})
-                    sb.table("playlists").update({"items": json.dumps(items, ensure_ascii=False)}).eq("id", pld["id"]).execute()
-                    st.rerun()
-
-            favs = get_favorites()
-            if favs:
-                st.markdown("---")
-                st.markdown('<div class="section-label">즐겨찾기에서 추가</div>', unsafe_allow_html=True)
-                for fi, fv in enumerate(favs):
-                    fa, fb = st.columns([4, 1])
-                    with fa:
-                        st.markdown(f'<div style="font-size:0.82rem;color:#8890aa;padding:6px 0">{fv["title"]}</div>', unsafe_allow_html=True)
-                    with fb:
-                        st.markdown('<div class="btn-sm">', unsafe_allow_html=True)
-                        if st.button("추가", key=f"fav_to_pl_{fi}", use_container_width=True):
-                            items.append({"title": fv["title"], "url": fv["url"]})
-                            sb.table("playlists").update({"items": json.dumps(items, ensure_ascii=False)}).eq("id", pld["id"]).execute()
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-        else:
-            st.markdown('<div class="section-label">플레이리스트</div>', unsafe_allow_html=True)
-            new_pl_name = st.text_input("", placeholder="새 플레이리스트 이름", label_visibility="collapsed", key="new_pl_name")
-            if st.button("+ 만들기", key="create_pl", use_container_width=False):
-                if new_pl_name.strip():
-                    sb.table("playlists").insert({"user_id": st.session_state.user["id"], "name": new_pl_name.strip(), "items": "[]"}).execute()
-                    st.rerun()
-
-            st.write("")
-
-            if not pls:
-                st.markdown('<div class="fav-empty">플레이리스트가 없어.<br>위에서 만들어봐.</div>', unsafe_allow_html=True)
-            else:
-                for pl in pls:
-                    items = json.loads(pl["items"] or "[]")
-                    st.markdown(f"""<div class="pl-card"><div class="pl-name">{pl['name']}</div><div class="pl-count">{len(items)}개 영상</div></div>""", unsafe_allow_html=True)
-                    oa, ob = st.columns([3, 1])
-                    with oa:
-                        if st.button("열기", key=f"pl_open_{pl['id']}", use_container_width=True):
-                            st.session_state.pl_open = pl["id"]
-                            st.rerun()
-                    with ob:
-                        st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-                        if st.button("삭제", key=f"pl_del_{pl['id']}", use_container_width=True):
-                            sb.table("playlists").delete().eq("id", pl["id"]).execute()
-                            st.rerun()
-                        st.markdown('</div>', unsafe_allow_html=True)
-                    st.write("")
-
-    # ── 탭6: 기록 ────────────────────────────────────────
-    with tab6:
-        st.markdown('<div class="section-label">재생 기록</div>', unsafe_allow_html=True)
-        history = get_history(30)
-        if not history:
-            st.markdown('<div class="fav-empty">아직 재생 기록이 없어.</div>', unsafe_allow_html=True)
-        else:
-            if st.button("기록 전체 삭제", key="clear_history"):
-                sb.table("history").delete().eq("user_id", st.session_state.user["id"]).execute()
-                st.rerun()
-            st.write("")
-            for idx, h in enumerate(history):
-                st.markdown(f"""<div class="fav-card"><div class="fav-title">{h['title']}</div><div class="fav-url">{h['watched_at'][:10]} · {h['url'][:50]}...</div></div>""", unsafe_allow_html=True)
-                hc1, hc2 = st.columns([3, 1])
-                with hc1:
-                    if st.button("▶ 재생", key=f"hist_play_{idx}", use_container_width=True):
-                        play(h["url"], h["title"])
-                with hc2:
-                    st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-                    if st.button("삭제", key=f"hist_del_{idx}", use_container_width=True):
-                        sb.table("history").delete().eq("id", h["id"]).execute()
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-                st.write("")
-
-    # ── 탭7: 키워드 ───────────────────────────────────────
-    with tab7:
-        st.markdown('<div class="section-label">추천 키워드 설정</div>', unsafe_allow_html=True)
-        st.caption("추가한 키워드가 추천 탭에서 우선 반영돼.")
-
-        with st.form("kw_form"):
-            kw_input = st.text_input("", placeholder="예: 하나코 나나", label_visibility="collapsed")
-            kw_submit = st.form_submit_button("추가", use_container_width=False)
-            if kw_submit and kw_input.strip():
-                sb.table("keywords").insert({"user_id": st.session_state.user["id"], "keyword": kw_input.strip()}).execute()
-                st.rerun()
-
-        st.write("")
-        kws = get_keywords()
-        if not kws:
-            st.markdown('<div class="fav-empty">추가된 키워드가 없어.<br>위에서 추가해봐.</div>', unsafe_allow_html=True)
-        else:
-            for kw in kws:
-                ka, kb = st.columns([4, 1])
-                with ka:
-                    st.markdown(f'<div style="background:#161b27;border:1px solid #1e2230;border-radius:8px;padding:10px 16px;font-size:0.85rem;color:#c8d0e8;">{kw["keyword"]}</div>', unsafe_allow_html=True)
-                with kb:
-                    st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-                    if st.button("삭제", key=f"kw_del_{kw['id']}", use_container_width=True):
-                        sb.table("keywords").delete().eq("id", kw["id"]).execute()
-                        st.rerun()
-                    st.markdown('</div>', unsafe_allow_html=True)
-                st.write("")
-
-# ══════════════════════════════════════════════════════
-# 플레이어
-# ══════════════════════════════════════════════════════
-elif st.session_state.view == "player":
-
-    queue = st.session_state.pl_queue
-    pos   = st.session_state.pl_pos
-
-    # 상단 컨트롤
-    r1, r2 = st.columns([1, 5])
-    with r1:
-        st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-        if st.button("← 돌아가기", use_container_width=True):
-            st.session_state.view = "home"
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-    with r2:
-        fav_txt = "★ 즐겨찾기됨" if is_fav(st.session_state.url) else "☆ 즐겨찾기"
-        st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
-        if st.button(fav_txt, use_container_width=True, key="player_fav"):
+with c_next:
+    if st.button("NEXT ⏭", use_container_width=True, key="d_next"):
+        play_next()
+with c_shuf:
+    shuf_label = "🔀 ON" if st.session_state.shuffle else "🔀 SHUF"
+    if st.button(shuf_label, use_container_width=True, key="d_shuf"):
+        st.session_state.shuffle = not st.session_state.shuffle
+        st.rerun()
+with c_rep:
+    rep_map = {"all": "🔁 ALL", "one": "🔂 ONE", "off": "➡ OFF"}
+    if st.button(rep_map.get(st.session_state.repeat_mode, "🔁 ALL"), use_container_width=True, key="d_rep"):
+        next_mode = {"all": "one", "one": "off", "off": "all"}[st.session_state.repeat_mode]
+        st.session_state.repeat_mode = next_mode
+        st.rerun()
+with c_lyric:
+    lyric_btn_txt = "📜 가사닫기" if st.session_state.show_lyrics_drawer else "📜 가사"
+    if st.button(lyric_btn_txt, use_container_width=True, key="d_lyric_toggle"):
+        st.session_state.show_lyrics_drawer = not st.session_state.show_lyrics_drawer
+        st.rerun()
+with c_thm:
+    thm_btn_txt = "🎨 테마닫기" if st.session_state.show_theme_selector else "🎨 테마"
+    if st.button(thm_btn_txt, use_container_width=True, key="d_theme_toggle"):
+        st.session_state.show_theme_selector = not st.session_state.show_theme_selector
+        st.rerun()
+with c_fav:
+    is_f = is_fav(st.session_state.url)
+    fav_icon = "★ FAV" if is_f else "☆ FAV"
+    st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
+    if st.button(fav_icon, use_container_width=True, key="d_fav"):
+        if st.session_state.url:
             toggle_fav(st.session_state.title, st.session_state.url)
             st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+with c_q:
+    q_txt = f"📋 QUEUE ({q_len})"
+    if st.button(q_txt, use_container_width=True, key="d_queue_toggle"):
+        st.session_state.show_queue_drawer = not st.session_state.show_queue_drawer
+        st.rerun()
 
-    if queue:
-        nc1, nc2, nc3 = st.columns([1, 1, 4])
-        with nc1:
-            st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-            if pos > 0:
-                if st.button("◀ 이전", use_container_width=True, key="prev"):
-                    play(queue[pos-1]["url"], queue[pos-1]["title"], queue=queue, pos=pos-1)
-            st.markdown('</div>', unsafe_allow_html=True)
-        with nc2:
-            st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-            if pos < len(queue) - 1:
-                if st.button("다음 ▶", use_container_width=True, key="next"):
-                    play(queue[pos+1]["url"], queue[pos+1]["title"], queue=queue, pos=pos+1)
-            st.markdown('</div>', unsafe_allow_html=True)
-        with nc3:
-            st.markdown(f'<div style="font-size:0.75rem;color:#3a3f52;padding:10px 0">{pos+1} / {len(queue)}</div>', unsafe_allow_html=True)
-
-    st.write("")
-
-    # 메인 레이아웃: 영상(왼쪽) + 관련영상(오른쪽)
-    left_col, right_col = st.columns([3, 1])
-
-    with left_col:
-        st.markdown('<div class="player-wrap">', unsafe_allow_html=True)
-        try:
-            player_url = st.session_state.url
-            # 유튜브 URL이면 iframe 임베드로 재생 (st.video는 엉뚱한 영상 나오는 버그 있음)
-            yt_match = re.search(r'(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})', player_url)
-            if yt_match:
-                vid_id_embed = yt_match.group(1)
-                st.markdown(f'''
-                <iframe
-                    width="100%" height="420"
-                    src="https://www.youtube.com/embed/{vid_id_embed}?autoplay=1"
-                    frameborder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowfullscreen
-                    style="border-radius:8px;">
-                </iframe>
-                ''', unsafe_allow_html=True)
-            else:
-                st.video(player_url)
-            st.markdown(f'<div class="player-title">{st.session_state.title}</div>', unsafe_allow_html=True)
-            st.markdown('<div class="player-sub">FTUBE · 광고 없음</div>', unsafe_allow_html=True)
-        except Exception as e:
-            st.error(f"재생할 수 없는 URL이야: {e}")
-            st.write("")
-            st.markdown('<div class="btn-ghost">', unsafe_allow_html=True)
-            if st.button("홈으로", use_container_width=False):
-                st.session_state.view = "home"
+# ── 테마 선택기 (LCD Color Switcher Panel) ──
+if st.session_state.show_theme_selector:
+    st.markdown('<div class="section-title" style="margin-top:16px;">LCD BACKLIGHT THEME SELECTOR</div>', unsafe_allow_html=True)
+    th_cols = st.columns(5)
+    theme_keys = ["green", "amber", "cyan", "purple", "ruby"]
+    for ti, tkey in enumerate(theme_keys):
+        tinfo = THEMES[tkey]
+        with th_cols[ti]:
+            is_active_thm = st.session_state.lcd_theme == tkey
+            prefix = "✓ " if is_active_thm else ""
+            if st.button(f"{prefix}{tinfo['name'].split()[0]} {tkey.upper()}", key=f"sel_thm_{tkey}", use_container_width=True):
+                st.session_state.lcd_theme = tkey
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("<hr style='border-color:#21283b;margin:16px 0;'>", unsafe_allow_html=True)
 
-    with right_col:
-        st.markdown('<div class="section-label">관련 영상</div>', unsafe_allow_html=True)
-        # 현재 영상 + 재생기록/즐겨찾기 기반 관련 영상 검색
-        try:
-            from collections import Counter
-            stopwords = {"이","그","저","것","수","을","를","가","은","는","에","의","로","으로","와","과","도","만","다","에서","하다","있다","없다","하고","했다","한","등","더","또","잘","못","안","왜","어","아","오","요","the","a","an","in","of","to","is","on","at","by","for"}
+# ── 가사 (Lyrics) 전체보기 서랍 ──
+if st.session_state.show_lyrics_drawer:
+    st.markdown(f'<div class="section-title" style="margin-top:16px;">LYRICS VIEWER // {cur_title}</div>', unsafe_allow_html=True)
+    if lyrics_data and (lyrics_data.get("synced") or lyrics_data.get("plain")):
+        raw_lrc = lyrics_data.get("synced") or lyrics_data.get("plain")
+        cleaned_lyrics = "\n".join([re.sub(r'\[\d{2}:\d{2}\.\d{2,3}\]', '', line).strip() for line in raw_lrc.splitlines() if line.strip()])
+        st.markdown(f"""
+        <div style="background:{cur_th['bg']};border:1px solid {cur_th['border']};border-radius:10px;padding:20px;font-family:'Share Tech Mono', monospace;color:{cur_th['text_sub']};line-height:2.0;white-space:pre-wrap;max-height:300px;overflow-y:auto;text-align:center;">
+{cleaned_lyrics}
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="empty-msg">등록된 가사를 찾을 수 없습니다. (Inst/Cover)</div>', unsafe_allow_html=True)
+    st.markdown("<hr style='border-color:#21283b;margin:16px 0;'>", unsafe_allow_html=True)
 
-            rel_title = st.session_state.title
+# ── 대기열 (Now Playing Queue) 서랍 ──
+if st.session_state.show_queue_drawer and st.session_state.queue:
+    st.markdown('<div class="section-title" style="margin-top:16px;">CURRENT AUDIO QUEUE</div>', unsafe_allow_html=True)
+    with st.container():
+        for qi, qitem in enumerate(st.session_state.queue):
+            is_cur = qi == st.session_state.q_pos
+            badge_icon = "▶ " if is_cur else f"{qi+1:02d}. "
+            t_col, a_col, p_col = st.columns([5, 3, 1])
+            with t_col:
+                st.markdown(f"<div style='font-family:JetBrains Mono;font-size:0.83rem;color:{cur_th['accent'] if is_cur else '#c9d1d9'};padding:8px 0;'>{badge_icon}{qitem.get('title', qitem.get('raw_title', 'Track'))}</div>", unsafe_allow_html=True)
+            with a_col:
+                st.markdown(f"<div style='font-size:0.75rem;color:#6e7681;padding:8px 0;'>{qitem.get('artist', 'Artist')}</div>", unsafe_allow_html=True)
+            with p_col:
+                if st.button("재생", key=f"q_jump_{qi}", use_container_width=True):
+                    play_track(qitem, queue_list=st.session_state.queue, pos=qi)
+    st.markdown("<hr style='border-color:#21283b;margin:16px 0;'>", unsafe_allow_html=True)
 
-            # 현재 영상에서 의미있는 단어 추출 (stopwords 제거, 1글자 제거)
-            cur_words = [w for w in rel_title.split() if len(w) > 1 and w.lower() not in stopwords]
+# ══════════════════════════════════════════════════════
+# 트랙 탐색 & 라이브러리 탭
+# ══════════════════════════════════════════════════════
+fav_cnt = len(get_favorites())
+pl_cnt = len(get_playlists())
+hist_cnt = len(get_history(30))
 
-            # 현재 영상 태그 (cover, mv, live 등 장르/형식)
-            cur_tags = analyze_title(rel_title)
+tab_rec, tab_mood, tab_search, tab_pl, tab_fav, tab_hist, tab_url = st.tabs([
+    "🎧 추천 음악",
+    "☕ 무드 스테이션",
+    "🔍 음원 검색",
+    f"📂 플레이리스트 ({pl_cnt})",
+    f"★ 즐겨찾기 ({fav_cnt})",
+    f"🕒 청취 기록 ({hist_cnt})",
+    "🔗 URL 직접입력",
+])
 
-            # 핵심 쿼리: 아티스트명/제목 단어를 최대한 많이 포함 (최대 4단어)
-            # 태그(cover 등)는 쿼리 뒤에 보조로만 붙임
-            core_words = cur_words[:4]
-            tag_suffix = cur_tags[:1]  # 태그 최대 1개만, 뒤에 붙임
-            rel_query = " ".join(core_words + tag_suffix)
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"}
-            resp = requests.get(f"https://www.youtube.com/results?search_query={requests.utils.quote(rel_query)}&hl=ko&gl=KR", headers=headers)
-            raw = re.findall(r'var ytInitialData = ({.*?});</script>', resp.text)
-            if raw:
-                data  = json.loads(raw[0])
-                items = data["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]["sectionListRenderer"]["contents"][0]["itemSectionRenderer"]["contents"]
-                rel_results = []
-                for item in items:
-                    if "videoRenderer" in item and len(rel_results) < 8:
-                        v        = item["videoRenderer"]
-                        vid_id   = v.get("videoId", "")
-                        rtitle   = v.get("title", {}).get("runs", [{}])[0].get("text", "")
-                        channel  = v.get("ownerText", {}).get("runs", [{}])[0].get("text", "")
-                        duration = v.get("lengthText", {}).get("simpleText", "")
-                        thumbs   = v.get("thumbnail", {}).get("thumbnails", [])
-                        thumb    = thumbs[0]["url"] if thumbs else None
-                        rurl     = yt_url(vid_id)
-                        # 현재 영상 제외
-                        if rurl != st.session_state.url:
-                            rel_results.append({"id": vid_id, "title": rtitle, "channel": channel, "duration": duration, "thumb": thumb, "url": rurl})
-
-                for ri, r in enumerate(rel_results):
-                    thumb_html = f'<img src="{r["thumb"]}" style="width:100%;border-radius:6px;margin-bottom:6px;">' if r["thumb"] else '<div style="width:100%;aspect-ratio:16/9;background:#1e2230;border-radius:6px;margin-bottom:6px;"></div>'
-                    st.markdown(f'''
-                    <div class="rel-card">
-                        {thumb_html}
-                        <div class="rel-title">{r["title"]}</div>
-                        <div class="rel-meta">{r["channel"]} · {r["duration"]}</div>
+# ── 탭 1: 추천 음악 ─────────────────────────────────────
+with tab_rec:
+    st.markdown('<div class="section-title">CURATED TRACKS FOR YOU</div>', unsafe_allow_html=True)
+    recs, kw_label = get_recommendations()
+    if not recs:
+        st.markdown('<div class="empty-msg">추천 음원을 불러오지 못했습니다.</div>', unsafe_allow_html=True)
+    else:
+        st.caption(f"'{kw_label}' 기반 음악 큐레이션 ({len(recs)}곡)")
+        for idx, trk in enumerate(recs):
+            tags_html = "".join([f"<span class='track-tag-badge'>{t}</span>" for t in trk.get("tags", [])[:2]])
+            st.markdown(f"""
+            <div class="track-row">
+                <div class="track-left">
+                    <div class="track-num">{idx+1:02d}</div>
+                    <div class="track-info">
+                        <div class="track-title-text">{tags_html}{trk['title']}</div>
+                        <div class="track-artist-text">{trk['artist']} · {trk.get('channel', '')}</div>
                     </div>
-                    ''', unsafe_allow_html=True)
-                    if st.button("▶", key=f"rel_{ri}", use_container_width=True):
-                        play(r["url"], r["title"])
-                    st.write("")
-        except Exception as e:
-            st.caption("관련 영상을 불러오지 못했어.")
+                </div>
+                <div class="track-duration">{trk.get('duration', '')}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            b_play, b_fav, b_add = st.columns([2, 1, 1])
+            with b_play:
+                if st.button("▶ 이 곡부터 전체재생", key=f"rec_p_{idx}", use_container_width=True):
+                    play_track(trk, queue_list=recs, pos=idx)
+            with b_fav:
+                f_state = is_fav(trk["url"])
+                if st.button("★ 담기" if not f_state else "★ 해제", key=f"rec_f_{idx}", use_container_width=True):
+                    toggle_fav(trk["title"], trk["url"])
+                    st.rerun()
+            with b_add:
+                if st.button("+ 대기열", key=f"rec_q_{idx}", use_container_width=True):
+                    st.session_state.queue.append(trk)
+                    st.toast(f"'{trk['title']}' 대기열 추가 완료")
+
+# ── 탭 2: 마레 & 세라의 무드 스테이션 ─────────────────────
+with tab_mood:
+    st.markdown('<div class="section-title">MOOD & AMBIENT STATIONS</div>', unsafe_allow_html=True)
+    st.caption("원하는 무드를 선택하면 검색 없이 최적의 테마 음원이 즉시 재생 목록에 로드됩니다.")
+    
+    m_col1, m_col2, m_col3 = st.columns(3)
+    with m_col1:
+        st.markdown("""
+        <div style="background:#131722;border:1px solid #21283b;border-radius:10px;padding:16px;text-align:center;margin-bottom:10px;">
+            <div style="font-size:1.8rem;margin-bottom:6px;">☕</div>
+            <div style="font-weight:600;font-size:0.95rem;color:#e6edf3;">야근 & 집중 BGM</div>
+            <div style="font-size:0.75rem;color:#8b949e;margin-top:4px;">차분하고 잔잔한 로파이/재즈</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("▶ 스테이션 재생 (야근 BGM)", key="mood_focus", use_container_width=True):
+            m_res = search_youtube_raw("작업용 잔잔한 로파이 lofi bgm", max_items=15)
+            if m_res: play_track(m_res[0], queue_list=m_res, pos=0)
+    
+    with m_col2:
+        st.markdown("""
+        <div style="background:#131722;border:1px solid #21283b;border-radius:10px;padding:16px;text-align:center;margin-bottom:10px;">
+            <div style="font-size:1.8rem;margin-bottom:6px;">🌙</div>
+            <div style="font-weight:600;font-size:0.95rem;color:#e6edf3;">새벽 감성 힐링</div>
+            <div style="font-size:0.75rem;color:#8b949e;margin-top:4px;">어쿠스틱 & 피아노 선율</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("▶ 스테이션 재생 (새벽 힐링)", key="mood_night", use_container_width=True):
+            m_res = search_youtube_raw("새벽 감성 잔잔한 어쿠스틱 피아노", max_items=15)
+            if m_res: play_track(m_res[0], queue_list=m_res, pos=0)
+            
+    with m_col3:
+        st.markdown("""
+        <div style="background:#131722;border:1px solid #21283b;border-radius:10px;padding:16px;text-align:center;margin-bottom:10px;">
+            <div style="font-size:1.8rem;margin-bottom:6px;">🎤</div>
+            <div style="font-weight:600;font-size:0.95rem;color:#e6edf3;">보컬 커버 명곡</div>
+            <div style="font-size:0.75rem;color:#8b949e;margin-top:4px;">우타이테 & 감성 보컬 커버</div>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("▶ 스테이션 재생 (보컬 커버)", key="mood_cover", use_container_width=True):
+            m_res = search_youtube_raw("인기 우타이테 커버곡 플레이리스트", max_items=15)
+            if m_res: play_track(m_res[0], queue_list=m_res, pos=0)
+
+# ── 탭 3: 음원 검색 ─────────────────────────────────────
+with tab_search:
+    st.markdown('<div class="section-title">SEARCH AUDIO DATABASE</div>', unsafe_allow_html=True)
+    with st.form("search_music_form"):
+        q_in = st.text_input("", placeholder="곡명, 아티스트, 우타이테, 커버곡 등 검색", label_visibility="collapsed")
+        submitted = st.form_submit_button("검색 실행", use_container_width=True)
+        if submitted and q_in.strip():
+            with st.spinner("음원 검색 중..."):
+                st.session_state.search_results = search_youtube_raw(q_in.strip(), max_items=25)
+                st.session_state.search_query = q_in.strip()
+    
+    if st.session_state.search_results:
+        s_list = st.session_state.search_results
+        st.caption(f"'{st.session_state.search_query}' 검색 결과 ({len(s_list)}곡)")
+        for idx, trk in enumerate(s_list):
+            tags_html = "".join([f"<span class='track-tag-badge'>{t}</span>" for t in trk.get("tags", [])[:2]])
+            st.markdown(f"""
+            <div class="track-row">
+                <div class="track-left">
+                    <div class="track-num">{idx+1:02d}</div>
+                    <div class="track-info">
+                        <div class="track-title-text">{tags_html}{trk['title']}</div>
+                        <div class="track-artist-text">{trk['artist']} · {trk.get('channel', '')}</div>
+                    </div>
+                </div>
+                <div class="track-duration">{trk.get('duration', '')}</div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            b_play, b_fav, b_add = st.columns([2, 1, 1])
+            with b_play:
+                if st.button("▶ 이 곡부터 전체재생", key=f"s_p_{idx}", use_container_width=True):
+                    play_track(trk, queue_list=s_list, pos=idx)
+            with b_fav:
+                f_state = is_fav(trk["url"])
+                if st.button("★ 담기" if not f_state else "★ 해제", key=f"s_f_{idx}", use_container_width=True):
+                    toggle_fav(trk["title"], trk["url"])
+                    st.rerun()
+            with b_add:
+                if st.button("+ 대기열", key=f"s_q_{idx}", use_container_width=True):
+                    st.session_state.queue.append(trk)
+                    st.toast(f"'{trk['title']}' 대기열 추가 완료")
+
+# ── 탭 4: 플레이리스트 ─────────────────────────────────
+with tab_pl:
+    st.markdown('<div class="section-title">MY PLAYLISTS</div>', unsafe_allow_html=True)
+    with st.form("new_pl_form"):
+        pl_name_in = st.text_input("", placeholder="새 플레이리스트 이름", label_visibility="collapsed")
+        pl_create = st.form_submit_button("+ 새 플레이리스트 만들기", use_container_width=True)
+        if pl_create and pl_name_in.strip():
+            sb.table("playlists").insert({"user_id": st.session_state.user["id"], "name": pl_name_in.strip(), "items": "[]"}).execute()
+            st.rerun()
+    
+    pls = get_playlists()
+    if not pls:
+        st.markdown('<div class="empty-msg">생성된 플레이리스트가 없습니다.</div>', unsafe_allow_html=True)
+    else:
+        for pl in pls:
+            items = json.loads(pl.get("items") or "[]")
+            st.markdown(f"""
+            <div class="track-row" style="border-left: 3px solid var(--lcd-acc);">
+                <div class="track-left">
+                    <div class="track-info">
+                        <div class="track-title-text">📂 {pl['name']}</div>
+                        <div class="track-artist-text">수록 음원: {len(items)}곡</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            p_play, p_del = st.columns([4, 1])
+            with p_play:
+                if items and st.button(f"▶ '{pl['name']}' 전체 재생 ({len(items)}곡)", key=f"pl_play_all_{pl['id']}", use_container_width=True):
+                    formatted_items = []
+                    for itm in items:
+                        parsed = smart_parse_title(itm["title"])
+                        formatted_items.append({
+                            "title": parsed["song"],
+                            "artist": parsed["artist"],
+                            "url": itm["url"],
+                            "duration": ""
+                        })
+                    play_track(formatted_items[0], queue_list=formatted_items, pos=0)
+            with p_del:
+                if st.button("삭제", key=f"pl_del_{pl['id']}", use_container_width=True):
+                    sb.table("playlists").delete().eq("id", pl["id"]).execute()
+                    st.rerun()
+            
+            if items:
+                with st.expander(f"수록곡 확인 ({len(items)}곡)"):
+                    for ii, item in enumerate(items):
+                        p_sub1, p_sub2 = st.columns([5, 1])
+                        with p_sub1:
+                            st.markdown(f"<div style='font-size:0.82rem;color:#c9d1d9;'>{ii+1:02d}. {item['title']}</div>", unsafe_allow_html=True)
+                        with p_sub2:
+                            if st.button("재생", key=f"pl_sub_p_{pl['id']}_{ii}", use_container_width=True):
+                                parsed = smart_parse_title(item["title"])
+                                play_track({"title": parsed["song"], "artist": parsed["artist"], "url": item["url"]})
+
+# ── 탭 5: 즐겨찾기 ─────────────────────────────────────
+with tab_fav:
+    st.markdown('<div class="section-title">FAVORITE TRACKS</div>', unsafe_allow_html=True)
+    favs = get_favorites()
+    if not favs:
+        st.markdown('<div class="empty-msg">즐겨찾기한 음원이 없습니다.</div>', unsafe_allow_html=True)
+    else:
+        fav_queue = []
+        for f in favs:
+            parsed = smart_parse_title(f["title"])
+            fav_queue.append({"title": parsed["song"], "artist": parsed["artist"], "url": f["url"], "tags": parsed["tags"]})
+            
+        if st.button(f"▶ 즐겨찾기 전체 재생 ({len(favs)}곡)", use_container_width=True, key="fav_all_play"):
+            play_track(fav_queue[0], queue_list=fav_queue, pos=0)
+            
+        for fi, f in enumerate(fav_queue):
+            st.markdown(f"""
+            <div class="track-row">
+                <div class="track-left">
+                    <div class="track-num">{fi+1:02d}</div>
+                    <div class="track-info">
+                        <div class="track-title-text">{f['title']}</div>
+                        <div class="track-artist-text">{f['artist']}</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            fb_p, fb_del = st.columns([4, 1])
+            with fb_p:
+                if st.button("▶ 재생", key=f"fav_play_{fi}", use_container_width=True):
+                    play_track(f, queue_list=fav_queue, pos=fi)
+            with fb_del:
+                if st.button("삭제", key=f"fav_del_{fi}", use_container_width=True):
+                    toggle_fav(f["title"], f["url"])
+                    st.rerun()
+
+# ── 탭 6: 청취 기록 ─────────────────────────────────────
+with tab_hist:
+    st.markdown('<div class="section-title">PLAYBACK HISTORY</div>', unsafe_allow_html=True)
+    history = get_history(30)
+    if not history:
+        st.markdown('<div class="empty-msg">청취 기록이 없습니다.</div>', unsafe_allow_html=True)
+    else:
+        if st.button("기록 전체 삭제", key="clear_hist_btn"):
+            sb.table("history").delete().eq("user_id", st.session_state.user["id"]).execute()
+            st.rerun()
+            
+        for hi, h in enumerate(history):
+            parsed = smart_parse_title(h["title"])
+            st.markdown(f"""
+            <div class="track-row">
+                <div class="track-left">
+                    <div class="track-num">{hi+1:02d}</div>
+                    <div class="track-info">
+                        <div class="track-title-text">{parsed['song']}</div>
+                        <div class="track-artist-text">{parsed['artist']} · {h.get('watched_at', '')[:10]}</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            hb_p, hb_del = st.columns([4, 1])
+            with hb_p:
+                if st.button("▶ 재생", key=f"hist_p_{hi}", use_container_width=True):
+                    play_track({"title": parsed["song"], "artist": parsed["artist"], "url": h["url"]})
+            with hb_del:
+                if st.button("삭제", key=f"hist_d_{hi}", use_container_width=True):
+                    sb.table("history").delete().eq("id", h["id"]).execute()
+                    st.rerun()
+
+# ── 탭 7: URL 직접입력 ──────────────────────────────────
+with tab_url:
+    st.markdown('<div class="section-title">DIRECT AUDIO STREAM LINK</div>', unsafe_allow_html=True)
+    with st.form("url_play_form"):
+        raw_url = st.text_input("", placeholder="YouTube 링크 (예: https://www.youtube.com/watch?v=...)", label_visibility="collapsed")
+        sub_url = st.form_submit_button("오디오 스트림 로드 및 재생", use_container_width=True)
+        if sub_url and raw_url.strip():
+            play_track({"title": "Direct Stream Audio", "artist": "External Link", "url": raw_url.strip()})
