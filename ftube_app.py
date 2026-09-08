@@ -165,7 +165,7 @@ html, body, [data-testid="stAppViewContainer"], .stApp {{
 .mp3-device-deck {{
     background: linear-gradient(180deg, #182235 0%, #121927 100%);
     border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 18px; padding: 24px; margin-bottom: 20px;
+    border-radius: 18px; padding: 20px 20px 14px 20px; margin-bottom: 20px;
     box-shadow: 0 16px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
     position: relative;
 }}
@@ -174,9 +174,21 @@ html, body, [data-testid="stAppViewContainer"], .stApp {{
     position: absolute; top: 8px; left: 24px;
     font-family: 'Share Tech Mono', monospace; font-size: 0.65rem; color: #64748b; letter-spacing: 0.18em;
 }}
+.queue-panel-deck {{
+    background: linear-gradient(180deg, #182235 0%, #121927 100%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 18px; padding: 18px 20px 14px 20px; margin-bottom: 20px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+    position: relative;
+}}
+.queue-panel-deck::before {{
+    content: "AUDIO QUEUE // DECK PLAYLIST";
+    position: absolute; top: 8px; left: 20px;
+    font-family: 'Share Tech Mono', monospace; font-size: 0.65rem; color: #64748b; letter-spacing: 0.18em;
+}}
 .mp3-lcd-screen {{
     background: var(--lcd-bg) !important; border: 2px solid var(--lcd-border) !important;
-    border-radius: 12px; padding: 20px 24px; margin-top: 10px; margin-bottom: 20px;
+    border-radius: 12px; padding: 18px 20px; margin-top: 10px; margin-bottom: 14px;
     position: relative;
     box-shadow: inset 0 0 28px var(--lcd-glow), 0 4px 16px rgba(0,0,0,0.7);
     overflow: hidden; transition: all 0.3s ease;
@@ -871,15 +883,25 @@ is_mp3_mode = st.session_state.player_mode == "mp3"
 beacon_cls = "beacon-dot" if is_mp3_mode else "beacon-dot video-mode"
 mode_title_badge = "MP3 DAP" if is_mp3_mode else "CINEMA VIDEO"
 
-head_col_logo, head_col_switch, head_col_user, head_col_out = st.columns([2.8, 2.4, 2.0, 1.0])
+head_col_logo, head_col_theme, head_col_switch, head_col_user, head_col_out = st.columns([2.2, 1.8, 2.3, 1.8, 1.0])
 
 with head_col_logo:
     st.markdown(f"""
     <div style="display:flex;align-items:center;gap:10px;padding:6px 0;">
         <div class="brand-logo-text">🎵 FTUBE<span>.{mode_title_badge}</span></div>
-        <div class="brand-tag">THEME: {st.session_state.lcd_theme.upper()}</div>
     </div>
     """, unsafe_allow_html=True)
+
+with head_col_theme:
+    st.write("")
+    with st.popover(f"🎨 THEME: {st.session_state.lcd_theme.upper()}", use_container_width=True):
+        st.caption("LCD 백라이트 테마 변경")
+        for theme_key, theme_data in THEMES.items():
+            is_cur = st.session_state.lcd_theme == theme_key
+            mark = "● " if is_cur else "○ "
+            if st.button(f"{mark}{theme_data['name']}", key=f"head_theme_{theme_key}", use_container_width=True):
+                st.session_state.lcd_theme = theme_key
+                st.rerun()
 
 with head_col_switch:
     st.write("")
@@ -913,139 +935,218 @@ queue_len = len(st.session_state.queue)
 pos_display = f"{st.session_state.queue_index + 1:02d}/{queue_len:02d}" if queue_len else "00/00"
 video_id_match = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", st.session_state.url) if st.session_state.url else None
 current_vid_id = video_id_match.group(1) if video_id_match else ""
+lyrics_data = st.session_state.current_lyrics or fetch_lyrics(current_title, current_artist)
 
-if is_mp3_mode:
-    status_label = "▶ PLAYING" if is_active else "■ STANDBY"
-    status_class = "lcd-status-playing" if is_active else "lcd-status-idle"
-    eq_class = "active" if is_active else ""
+deck_col_player, deck_col_queue = st.columns([1.55, 1.0], gap="medium")
 
-    lyrics_data = st.session_state.current_lyrics or fetch_lyrics(current_title, current_artist)
-    lyrics_display = "♪ (INSTRUMENTAL / NO LYRICS FOUND) ♪"
-    if lyrics_data:
-        if lyrics_data.get("synced"):
-            parsed_lines = parse_lrc_lines(lyrics_data["synced"])
-            if parsed_lines:
-                lyrics_display = f"♫ {parsed_lines[0]['text']}"
-        elif lyrics_data.get("plain"):
-            first_lines = [l.strip() for l in lyrics_data["plain"].splitlines() if l.strip()]
-            if first_lines:
-                lyrics_display = f"♫ {first_lines[0]}"
-    if not is_active:
-        lyrics_display = "[ STANDBY // SELECT A TRACK TO PLAY ]"
+with deck_col_player:
+    if is_mp3_mode:
+        lyrics_display = "♪ (INSTRUMENTAL / NO LYRICS FOUND) ♪"
+        if lyrics_data:
+            if lyrics_data.get("synced"):
+                parsed_lines = parse_lrc_lines(lyrics_data["synced"])
+                if parsed_lines:
+                    lyrics_display = f"♫ {parsed_lines[0]['text']}"
+            elif lyrics_data.get("plain"):
+                first_lines = [l.strip() for l in lyrics_data["plain"].splitlines() if l.strip()]
+                if first_lines:
+                    lyrics_display = f"♫ {first_lines[0]}"
+        if not is_active:
+            lyrics_display = "[ STANDBY // SELECT A TRACK TO PLAY ]"
 
+        status_label = "▶ PLAYING" if is_active else "■ STANDBY"
+        status_class = "lcd-status-playing" if is_active else "lcd-status-idle"
+        eq_class = "active" if is_active else ""
+
+        st.markdown(f"""
+        <div class="mp3-device-deck">
+            <div class="mp3-lcd-screen">
+                <div class="lcd-top-bar">
+                    <div class="{status_class}">{status_label}</div>
+                    <div class="lcd-meta-badge">TRK [{pos_display}]</div>
+                    <div class="lcd-codec">AUDIO · 320 KBPS · STEREO</div>
+                </div>
+                <div class="lcd-main-info">
+                    <div class="lcd-track-title">🎵 {current_title}</div>
+                    <div class="lcd-artist-name">ARTIST // {current_artist}</div>
+                </div>
+                <div class="lcd-lyrics-box">
+                    <div class="lcd-lyrics-text">{lyrics_display}</div>
+                </div>
+                <div class="lcd-eq-wrap">
+                    {"".join(['<div class="lcd-eq-bar ' + eq_class + '"></div>' for _ in range(12)])}
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if is_active and current_vid_id:
+            st.markdown(f'''
+            <iframe class="hidden-audio-frame"
+                src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1"
+                allow="autoplay">
+            </iframe>
+            ''', unsafe_allow_html=True)
+
+        c_prev, c_play, c_next, c_shuf, c_rep, c_lyr, c_fav = st.columns([1.0, 1.3, 1.0, 0.85, 0.95, 0.9, 0.8])
+        with c_prev:
+            if st.button("⏮ PREV", use_container_width=True, key="deck_prev"):
+                play_prev()
+        with c_play:
+            st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+            if st.button("⏸ PAUSE" if is_active else "▶ PLAY", use_container_width=True, key="deck_play"):
+                st.session_state.is_playing = not st.session_state.is_playing
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        with c_next:
+            if st.button("NEXT ⏭", use_container_width=True, key="deck_next"):
+                play_next()
+        with c_shuf:
+            shuf_label = "🔀 ON" if st.session_state.shuffle else "🔀 SHUF"
+            if st.button(shuf_label, use_container_width=True, key="deck_shuffle", help="셔플 모드"):
+                st.session_state.shuffle = not st.session_state.shuffle
+                st.rerun()
+        with c_rep:
+            rep_labels = {"all": "🔁 ALL", "one": "🔂 ONE", "off": "➡ OFF"}
+            if st.button(rep_labels.get(st.session_state.repeat_mode, "🔁 ALL"), use_container_width=True, key="deck_repeat", help="반복 모드"):
+                next_mode_map = {"all": "one", "one": "off", "off": "all"}
+                st.session_state.repeat_mode = next_mode_map[st.session_state.repeat_mode]
+                st.rerun()
+        with c_lyr:
+            lyr_label = "📜 닫기" if st.session_state.show_lyrics_drawer else "📜 가사"
+            if st.button(lyr_label, use_container_width=True, key="deck_lyrics_toggle", help="가사 뷰어 토글"):
+                st.session_state.show_lyrics_drawer = not st.session_state.show_lyrics_drawer
+                st.rerun()
+        with c_fav:
+            st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
+            if st.button("★ FAV" if is_favorite(st.session_state.url) else "☆ FAV", use_container_width=True, key="deck_fav", help="즐겨찾기 토글"):
+                if st.session_state.url:
+                    toggle_favorite(st.session_state.title, st.session_state.url)
+                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    else:
+        st.markdown('<div class="video-cinema-deck">', unsafe_allow_html=True)
+        if is_active and current_vid_id:
+            st.markdown(f'''
+            <div class="video-wrapper">
+                <iframe src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0"
+                    allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen>
+                </iframe>
+            </div>
+            <div class="video-meta-bar">
+                <div>
+                    <div class="video-title-text">🎬 {current_title}</div>
+                    <div class="video-channel-text">{current_artist} {f"· {current_channel}" if current_channel else ""}</div>
+                </div>
+                <div class="mode-indicator-pill"><div class="beacon-dot video-mode"></div>NOW PLAYING [{pos_display}]</div>
+            </div>
+            ''', unsafe_allow_html=True)
+        else:
+            st.markdown('''
+            <div class="video-wrapper" style="display:flex;align-items:center;justify-content:center;color:#64748b;font-family:\'Share Tech Mono\', monospace;height:240px;">
+                <div style="text-align:center;padding-top:80px;">
+                    <div style="font-size:2rem;margin-bottom:8px;">🎬</div>
+                    <div>NO VIDEO LOADED // SELECT A TRACK BELOW</div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        c_v_prev, c_v_play, c_v_next, c_v_shuf, c_v_rep, c_v_fav = st.columns([1.0, 1.3, 1.0, 0.9, 0.9, 0.9])
+        with c_v_prev:
+            if st.button("⏮ PREV", use_container_width=True, key="v_deck_prev"):
+                play_prev()
+        with c_v_play:
+            st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
+            if st.button("⏸ PAUSE" if is_active else "▶ PLAY", use_container_width=True, key="v_deck_play"):
+                st.session_state.is_playing = not st.session_state.is_playing
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+        with c_v_next:
+            if st.button("NEXT ⏭", use_container_width=True, key="v_deck_next"):
+                play_next()
+        with c_v_shuf:
+            shuf_label = "🔀 ON" if st.session_state.shuffle else "🔀 SHUF"
+            if st.button(shuf_label, use_container_width=True, key="v_deck_shuffle"):
+                st.session_state.shuffle = not st.session_state.shuffle
+                st.rerun()
+        with c_v_rep:
+            rep_labels = {"all": "🔁 ALL", "one": "🔂 ONE", "off": "➡ OFF"}
+            if st.button(rep_labels.get(st.session_state.repeat_mode, "🔁 ALL"), use_container_width=True, key="v_deck_repeat"):
+                next_mode_map = {"all": "one", "one": "off", "off": "all"}
+                st.session_state.repeat_mode = next_mode_map[st.session_state.repeat_mode]
+                st.rerun()
+        with c_v_fav:
+            st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
+            if st.button("★ FAV" if is_favorite(st.session_state.url) else "☆ FAV", use_container_width=True, key="v_deck_fav"):
+                if st.session_state.url:
+                    toggle_favorite(st.session_state.title, st.session_state.url)
+                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+with deck_col_queue:
     st.markdown(f"""
-    <div class="mp3-device-deck">
-        <div class="mp3-lcd-screen">
-            <div class="lcd-top-bar">
-                <div class="{status_class}">{status_label}</div>
-                <div class="lcd-meta-badge">TRK [{pos_display}]</div>
-                <div class="lcd-codec">AUDIO · 320 KBPS · STEREO</div>
+    <div class="queue-panel-deck">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:2px;padding-bottom:6px;border-bottom:1px dashed rgba(255,255,255,0.12);">
+            <div style="font-family:'Share Tech Mono', monospace;font-size:0.85rem;color:var(--lcd-acc);font-weight:700;">
+                📋 DECK QUEUE ({queue_len})
             </div>
-            <div class="lcd-main-info">
-                <div class="lcd-track-title">🎵 {current_title}</div>
-                <div class="lcd-artist-name">ARTIST // {current_artist}</div>
-            </div>
-            <div class="lcd-lyrics-box">
-                <div class="lcd-lyrics-text">{lyrics_display}</div>
-            </div>
-            <div class="lcd-eq-wrap">
-                {"".join(['<div class="lcd-eq-bar ' + eq_class + '"></div>' for _ in range(12)])}
+            <div style="font-family:'Share Tech Mono', monospace;font-size:0.75rem;color:#94a3b8;">
+                TRK [{pos_display}]
             </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-    if is_active and current_vid_id:
-        st.markdown(f'''
-        <iframe class="hidden-audio-frame"
-            src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1"
-            allow="autoplay">
-        </iframe>
-        ''', unsafe_allow_html=True)
+    if st.session_state.queue:
+        with st.container(height=265):
+            for q_idx, q_item in enumerate(st.session_state.queue):
+                is_cur = q_idx == st.session_state.queue_index
+                badge_icon = "▶ " if is_cur else f"{q_idx+1:02d}. "
+                q_c_info, q_c_play, q_c_del = st.columns([3.8, 1.1, 0.8])
+                with q_c_info:
+                    cur_color = current_theme['accent'] if is_cur else '#f1f5f9'
+                    st.markdown(f"""
+                    <div style="padding:4px 0;overflow:hidden;">
+                        <div style="font-family:'JetBrains Mono';font-size:0.80rem;color:{cur_color};font-weight:{'700' if is_cur else '400'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                            {badge_icon}{q_item.get('title', q_item.get('raw_title', 'Track'))}
+                        </div>
+                        <div style="font-size:0.72rem;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                            {q_item.get('artist', 'Unknown')}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                with q_c_play:
+                    if st.button("▶", key=f"q_play_side_{q_idx}", use_container_width=True, help="이 곡 재생"):
+                        play_track(q_item, queue_list=st.session_state.queue, pos=q_idx)
+                with q_c_del:
+                    if st.button("✕", key=f"q_del_side_{q_idx}", use_container_width=True, help="대기열에서 제거"):
+                        st.session_state.queue.pop(q_idx)
+                        if st.session_state.queue_index >= len(st.session_state.queue):
+                            st.session_state.queue_index = max(0, len(st.session_state.queue) - 1)
+                        st.rerun()
 
-else:
-    st.markdown('<div class="video-cinema-deck">', unsafe_allow_html=True)
-    if is_active and current_vid_id:
-        st.markdown(f'''
-        <div class="video-wrapper">
-            <iframe src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0"
-                allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen>
-            </iframe>
-        </div>
-        <div class="video-meta-bar">
-            <div>
-                <div class="video-title-text">🎬 {current_title}</div>
-                <div class="video-channel-text">{current_artist} {f"· {current_channel}" if current_channel else ""}</div>
-            </div>
-            <div class="mode-indicator-pill"><div class="beacon-dot video-mode"></div>NOW PLAYING [{pos_display}]</div>
-        </div>
-        ''', unsafe_allow_html=True)
-    else:
-        st.markdown('''
-        <div class="video-wrapper" style="display:flex;align-items:center;justify-content:center;color:#64748b;font-family:\'Share Tech Mono\', monospace;height:320px;">
-            <div style="text-align:center;padding-top:120px;">
-                <div style="font-size:2rem;margin-bottom:8px;">🎬</div>
-                <div>NO VIDEO LOADED // SELECT A TRACK BELOW</div>
-            </div>
-        </div>
-        ''', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
-btn_cols = st.columns([1, 1.3, 1, 1, 1, 1.1, 1.2, 1, 1.2])
-
-with btn_cols[0]:
-    if st.button("⏮ PREV", use_container_width=True, key="deck_prev"):
-        play_prev()
-with btn_cols[1]:
-    st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-    if st.button("⏸ PAUSE" if is_active else "▶ PLAY", use_container_width=True, key="deck_play"):
-        st.session_state.is_playing = not st.session_state.is_playing
-        st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-with btn_cols[2]:
-    if st.button("NEXT ⏭", use_container_width=True, key="deck_next"):
-        play_next()
-with btn_cols[3]:
-    if st.button("🔀 ON" if st.session_state.shuffle else "🔀 SHUF", use_container_width=True, key="deck_shuffle"):
-        st.session_state.shuffle = not st.session_state.shuffle
-        st.rerun()
-with btn_cols[4]:
-    repeat_labels = {"all": "🔁 ALL", "one": "🔂 ONE", "off": "➡ OFF"}
-    if st.button(repeat_labels.get(st.session_state.repeat_mode, "🔁 ALL"), use_container_width=True, key="deck_repeat"):
-        next_mode_map = {"all": "one", "one": "off", "off": "all"}
-        st.session_state.repeat_mode = next_mode_map[st.session_state.repeat_mode]
-        st.rerun()
-with btn_cols[5]:
-    if st.button("📜 가사닫기" if st.session_state.show_lyrics_drawer else "📜 가사", use_container_width=True, key="deck_lyrics_toggle"):
-        st.session_state.show_lyrics_drawer = not st.session_state.show_lyrics_drawer
-        st.rerun()
-with btn_cols[6]:
-    if st.button("🎨 테마닫기" if st.session_state.show_theme_selector else "🎨 테마", use_container_width=True, key="deck_theme_toggle"):
-        st.session_state.show_theme_selector = not st.session_state.show_theme_selector
-        st.rerun()
-with btn_cols[7]:
-    st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
-    if st.button("★ FAV" if is_favorite(st.session_state.url) else "☆ FAV", use_container_width=True, key="deck_fav"):
-        if st.session_state.url:
-            toggle_favorite(st.session_state.title, st.session_state.url)
-            st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-with btn_cols[8]:
-    if st.button(f"📋 QUEUE ({queue_len})", use_container_width=True, key="deck_queue_toggle"):
-        st.session_state.show_queue_drawer = not st.session_state.show_queue_drawer
-        st.rerun()
-
-if st.session_state.show_theme_selector:
-    st.markdown('<div class="section-title" style="margin-top:16px;">LCD BACKLIGHT THEME SELECTOR</div>', unsafe_allow_html=True)
-    theme_cols = st.columns(5)
-    for idx, theme_key in enumerate(["green", "amber", "cyan", "purple", "ruby"]):
-        with theme_cols[idx]:
-            prefix = "✓ " if st.session_state.lcd_theme == theme_key else ""
-            if st.button(f"{prefix}{THEMES[theme_key]['name'].split()[0]} {theme_key.upper()}", key=f"sel_theme_{theme_key}", use_container_width=True):
-                st.session_state.lcd_theme = theme_key
+        col_q_clear, col_q_shuf = st.columns([1, 1])
+        with col_q_clear:
+            if st.button("🗑 대기열 비우기", use_container_width=True, key="clear_deck_queue_btn"):
+                st.session_state.queue = []
+                st.session_state.queue_index = 0
                 st.rerun()
-    st.markdown("<hr style='border-color:rgba(255,255,255,0.1);margin:16px 0;'>", unsafe_allow_html=True)
+        with col_q_shuf:
+            if st.button("🔀 대기열 섞기", use_container_width=True, key="shuf_deck_queue_btn"):
+                random.shuffle(st.session_state.queue)
+                st.rerun()
+    else:
+        st.markdown("""
+        <div style="background:rgba(15,23,42,0.6);border:1px dashed rgba(255,255,255,0.1);border-radius:12px;padding:65px 16px;text-align:center;margin-top:6px;">
+            <div style="font-size:1.6rem;margin-bottom:6px;">🎵</div>
+            <div style="font-family:'Share Tech Mono', monospace;font-size:0.80rem;color:#94a3b8;line-height:1.6;">
+                [ QUEUE EMPTY ]<br>
+                하단 추천/검색에서 곡을<br>선택하여 재생하세요
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
 if st.session_state.show_lyrics_drawer:
     st.markdown(f'<div class="section-title" style="margin-top:16px;">LYRICS VIEWER // {current_title}</div>', unsafe_allow_html=True)
@@ -1059,22 +1160,6 @@ if st.session_state.show_lyrics_drawer:
         """, unsafe_allow_html=True)
     else:
         st.markdown('<div class="empty-msg">등록된 가사를 찾을 수 없습니다. (Inst/Cover)</div>', unsafe_allow_html=True)
-    st.markdown("<hr style='border-color:rgba(255,255,255,0.1);margin:16px 0;'>", unsafe_allow_html=True)
-
-if st.session_state.show_queue_drawer and st.session_state.queue:
-    st.markdown('<div class="section-title" style="margin-top:16px;">CURRENT AUDIO QUEUE</div>', unsafe_allow_html=True)
-    with st.container():
-        for q_idx, q_item in enumerate(st.session_state.queue):
-            is_cur = q_idx == st.session_state.queue_index
-            badge_icon = "▶ " if is_cur else f"{q_idx+1:02d}. "
-            col_title, col_artist, col_play = st.columns([5, 3, 1])
-            with col_title:
-                st.markdown(f"<div style='font-family:JetBrains Mono;font-size:0.83rem;color:{current_theme['accent'] if is_cur else '#e2e8f0'};padding:8px 0;'>{badge_icon}{q_item.get('title', q_item.get('raw_title', 'Track'))}</div>", unsafe_allow_html=True)
-            with col_artist:
-                st.markdown(f"<div style='font-size:0.78rem;color:#94a3b8;padding:8px 0;'>{q_item.get('artist', 'Artist')}</div>", unsafe_allow_html=True)
-            with col_play:
-                if st.button("재생", key=f"queue_jump_{q_idx}", use_container_width=True):
-                    play_track(q_item, queue_list=st.session_state.queue, pos=q_idx)
     st.markdown("<hr style='border-color:rgba(255,255,255,0.1);margin:16px 0;'>", unsafe_allow_html=True)
 
 
