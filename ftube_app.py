@@ -321,7 +321,10 @@ html, body, [data-testid="stAppViewContainer"], .stApp {{
     font-family: 'Plus Jakarta Sans', sans-serif !important; font-size: 0.82rem !important; font-weight: 600 !important;
     border-radius: 10px !important; border: 1px solid rgba(255, 255, 255, 0.12) !important;
     background: rgba(30, 41, 67, 0.8) !important; color: #e2e8f0 !important;
-    padding: 9px 16px !important; transition: all 0.2s ease !important;
+    padding: 8px 16px !important; min-height: 38px !important; height: 38px !important;
+    display: inline-flex !important; align-items: center !important; justify-content: center !important;
+    box-sizing: border-box !important; margin: 0 !important;
+    transition: all 0.2s ease !important;
 }}
 .stButton button:hover, [data-testid="stPopover"] button:hover {{
     background: rgba(43, 58, 92, 0.9) !important; border-color: rgba(96, 165, 250, 0.5) !important;
@@ -329,7 +332,7 @@ html, body, [data-testid="stAppViewContainer"], .stApp {{
 }}
 .btn-primary button {{ background: linear-gradient(135deg, #2563eb, #3b82f6) !important; border-color: #60a5fa !important; color: #ffffff !important; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35) !important; }}
 .btn-primary button:hover {{ background: linear-gradient(135deg, #1d4ed8, #2563eb) !important; box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important; }}
-.btn-mode-toggle button {{ background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.25)) !important; border-color: rgba(96, 165, 250, 0.4) !important; color: #67e8f9 !important; }}
+.btn-mode-toggle button {{ background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.25)) !important; border-color: rgba(96, 165, 250, 0.4) !important; color: #67e8f9 !important; min-height: 38px !important; height: 38px !important; }}
 .btn-fav button {{ color: #fbbf24 !important; border-color: rgba(251, 191, 36, 0.4) !important; }}
 
 div[data-testid="stForm"] {{
@@ -883,17 +886,16 @@ is_mp3_mode = st.session_state.player_mode == "mp3"
 beacon_cls = "beacon-dot" if is_mp3_mode else "beacon-dot video-mode"
 mode_title_badge = "MP3 DAP" if is_mp3_mode else "CINEMA VIDEO"
 
-head_col_logo, head_col_theme, head_col_switch, head_col_user, head_col_out = st.columns([2.2, 1.8, 2.3, 1.8, 1.0])
+head_col_logo, head_col_theme, head_col_switch, head_col_user, head_col_out = st.columns([2.0, 1.6, 2.0, 1.8, 0.9], vertical_alignment="center")
 
 with head_col_logo:
     st.markdown(f"""
-    <div style="display:flex;align-items:center;gap:10px;padding:6px 0;">
+    <div style="display:flex;align-items:center;gap:10px;">
         <div class="brand-logo-text">🎵 FTUBE<span>.{mode_title_badge}</span></div>
     </div>
     """, unsafe_allow_html=True)
 
 with head_col_theme:
-    st.write("")
     with st.popover(f"🎨 THEME: {st.session_state.lcd_theme.upper()}", use_container_width=True):
         st.caption("LCD 백라이트 테마 변경")
         for theme_key, theme_data in THEMES.items():
@@ -904,7 +906,6 @@ with head_col_theme:
                 st.rerun()
 
 with head_col_switch:
-    st.write("")
     st.markdown('<div class="btn-mode-toggle">', unsafe_allow_html=True)
     switch_btn_label = "🎬 영상 모드로 전환" if is_mp3_mode else "📻 MP3 오디오 모드로 전환"
     if st.button(switch_btn_label, use_container_width=True, key="header_mode_switch_btn"):
@@ -914,14 +915,13 @@ with head_col_switch:
 
 with head_col_user:
     st.markdown(f"""
-    <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:12px 0;">
+    <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;">
         <div class="mode-indicator-pill"><div class="{beacon_cls}"></div>{mode_title_badge}</div>
         <div style="font-size:0.82rem;font-family:'JetBrains Mono';color:#94a3b8;">USER: <b style="color:#60a5fa;">{st.session_state.user['username']}</b></div>
     </div>
     """, unsafe_allow_html=True)
 
 with head_col_out:
-    st.write("")
     if st.button("로그아웃", use_container_width=True, key="header_logout_btn"):
         st.session_state.user = None
         st.rerun()
@@ -1167,8 +1167,8 @@ user_playlists = get_playlists()
 fav_list = get_favorites()
 history_list = get_history(30)
 
-tab_rec, tab_mood, tab_search, tab_pl, tab_fav, tab_hist, tab_url = st.tabs([
-    "🎧 추천 음악", "☕ 무드 스테이션", "🔍 음원 & 영상 검색",
+tab_rec, tab_search, tab_pl, tab_fav, tab_hist, tab_url = st.tabs([
+    "🎧 추천 음악", "🔍 음원 & 영상 검색",
     f"📂 플레이리스트 ({len(user_playlists)})", f"★ 즐겨찾기 ({len(fav_list)})",
     f"🕒 청취 기록 ({len(history_list)})", "🔗 URL 직접입력",
 ])
@@ -1183,29 +1183,6 @@ with tab_rec:
         st.caption(f"'{keyword_label}' 기반 추천 ({len(display_recs)}곡)")
         for idx, trk in enumerate(display_recs):
             render_track_row(idx, trk, key_prefix="rec", user_playlists=user_playlists)
-
-with tab_mood:
-    st.markdown('<div class="section-title">MOOD & AMBIENT STATIONS</div>', unsafe_allow_html=True)
-    st.caption("원하는 무드를 선택하면 추천 곡들이 대기열에 로드되어 재생됩니다.")
-    mood_configs = [
-        ("☕", "야근 & 집중 BGM", "차분하고 잔잔한 로파이/재즈", "작업용 잔잔한 로파이 lofi bgm", "mood_focus"),
-        ("🌙", "새벽 감성 힐링", "어쿠스틱 & 피아노 선율", "새벽 감성 잔잔한 어쿠스틱 피아노", "mood_night"),
-        ("🎤", "보컬 커버 명곡", "우타이테 & 감성 보컬 커버", "인기 우타이테 커버곡 플레이리스트", "mood_cover"),
-    ]
-    mood_cols = st.columns(3)
-    for idx, (icon, title, desc, query, btn_key) in enumerate(mood_configs):
-        with mood_cols[idx]:
-            st.markdown(f"""
-            <div style="background:rgba(22,30,48,0.7);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:18px;text-align:center;margin-bottom:10px;">
-                <div style="font-size:1.9rem;margin-bottom:8px;">{icon}</div>
-                <div style="font-weight:700;font-size:0.98rem;color:#f8fafc;">{title}</div>
-                <div style="font-size:0.78rem;color:#94a3b8;margin-top:4px;">{desc}</div>
-            </div>
-            """, unsafe_allow_html=True)
-            if st.button(f"▶ 스테이션 재생 ({title.split()[0]})", key=btn_key, use_container_width=True):
-                mood_tracks = search_youtube_raw(query, max_items=15)
-                if mood_tracks:
-                    play_track(mood_tracks[0], queue_list=mood_tracks, pos=0)
 
 with tab_search:
     st.markdown('<div class="section-title">SEARCH MEDIA DATABASE</div>', unsafe_allow_html=True)
