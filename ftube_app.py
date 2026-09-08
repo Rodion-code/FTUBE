@@ -14,7 +14,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
-import yt_dlp
+try:
+    import yt_dlp
+    YTDLP_AVAILABLE = True
+except ImportError:
+    YTDLP_AVAILABLE = False
 from supabase import Client, create_client
 
 st.set_page_config(page_title="FTUBE - Audio & Cinema", page_icon="🎵", layout="wide")
@@ -881,8 +885,12 @@ def search_youtube_raw(query: str, max_items: int = 25) -> List[Dict[str, Any]]:
 
 
 
+
 def download_mp3_from_youtube(youtube_url: str, title: str) -> Optional[bytes]:
     """Download audio from YouTube and return MP3 bytes using yt-dlp with android client."""
+    if not YTDLP_AVAILABLE:
+        st.error("yt-dlp가 설치되지 않았습니다. requirements.txt에 yt-dlp를 추가해주세요.")
+        return None
     safe_title = re.sub(r'[\\/:*?"<>|]', "", title).strip() or "audio"
     tmpdir = tempfile.mkdtemp(prefix="ftube_dl_")
     outtmpl = os.path.join(tmpdir, "%(title)s.%(ext)s")
@@ -1431,7 +1439,7 @@ with deck_col_player:
                     st.rerun()
 
         # --- MP3 Download Row ---
-        if is_active and st.session_state.url:
+        if is_active and st.session_state.url and YTDLP_AVAILABLE:
             st.markdown("""
             <div style="margin-top:10px;padding:10px 14px;background:rgba(15,23,42,0.5);
                         border:1px solid rgba(96,165,250,0.2);border-radius:12px;
