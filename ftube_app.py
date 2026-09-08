@@ -312,7 +312,7 @@ html, body, [data-testid="stAppViewContainer"], .stApp {{
 }}
 [data-testid="stTabs"] button[role="tab"]:hover {{ color: #f8fafc !important; background: rgba(33, 45, 71, 0.8) !important; }}
 
-.stTextInput input {{
+.stTextInput input {{2
     background-color: rgba(22, 30, 48, 0.7) !important; border: 1px solid rgba(255, 255, 255, 0.12) !important;
     border-radius: 10px !important; color: #f8fafc !important; padding: 11px 16px !important; font-size: 0.9rem !important;
 }}
