@@ -321,19 +321,27 @@ html, body, [data-testid="stAppViewContainer"], .stApp {{
     font-family: 'Plus Jakarta Sans', sans-serif !important; font-size: 0.82rem !important; font-weight: 600 !important;
     border-radius: 10px !important; border: 1px solid rgba(255, 255, 255, 0.12) !important;
     background: rgba(30, 41, 67, 0.8) !important; color: #e2e8f0 !important;
-    padding: 8px 16px !important; min-height: 38px !important; height: 38px !important;
+    padding: 8px 12px !important; min-height: 38px !important; height: 38px !important;
     display: inline-flex !important; align-items: center !important; justify-content: center !important;
-    box-sizing: border-box !important; margin: 0 !important;
+    box-sizing: border-box !important; margin: 0 !important; white-space: nowrap !important;
     transition: all 0.2s ease !important;
 }}
 .stButton button:hover, [data-testid="stPopover"] button:hover {{
     background: rgba(43, 58, 92, 0.9) !important; border-color: rgba(96, 165, 250, 0.5) !important;
     color: #ffffff !important; transform: translateY(-1px);
 }}
-.btn-primary button {{ background: linear-gradient(135deg, #2563eb, #3b82f6) !important; border-color: #60a5fa !important; color: #ffffff !important; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35) !important; }}
-.btn-primary button:hover {{ background: linear-gradient(135deg, #1d4ed8, #2563eb) !important; box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important; }}
+.stButton button[kind="primary"], .stButton button[data-testid="baseButton-primary"] {{
+    background: linear-gradient(135deg, #2563eb, #3b82f6) !important;
+    border-color: #60a5fa !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35) !important;
+}}
+.stButton button[kind="primary"]:hover, .stButton button[data-testid="baseButton-primary"]:hover {{
+    background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important;
+}}
 .btn-mode-toggle button {{ background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.25)) !important; border-color: rgba(96, 165, 250, 0.4) !important; color: #67e8f9 !important; min-height: 38px !important; height: 38px !important; }}
-.btn-fav button {{ color: #fbbf24 !important; border-color: rgba(251, 191, 36, 0.4) !important; }}
 
 div[data-testid="stForm"] {{
     background: rgba(22, 30, 48, 0.85) !important;
@@ -988,21 +996,19 @@ with deck_col_player:
             </iframe>
             ''', unsafe_allow_html=True)
 
-        c_prev, c_play, c_next, c_shuf, c_rep, c_lyr, c_fav = st.columns([1.0, 1.3, 1.0, 0.85, 0.95, 0.9, 0.8])
+        c_prev, c_play, c_next, c_shuf, c_rep, c_lyr, c_fav = st.columns([1.0, 1.25, 1.0, 1.0, 1.0, 1.0, 0.9], vertical_alignment="center")
         with c_prev:
             if st.button("⏮ PREV", use_container_width=True, key="deck_prev"):
                 play_prev()
         with c_play:
-            st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-            if st.button("⏸ PAUSE" if is_active else "▶ PLAY", use_container_width=True, key="deck_play"):
+            if st.button("⏸ PAUSE" if is_active else "▶ PLAY", use_container_width=True, key="deck_play", type="primary"):
                 st.session_state.is_playing = not st.session_state.is_playing
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with c_next:
             if st.button("NEXT ⏭", use_container_width=True, key="deck_next"):
                 play_next()
         with c_shuf:
-            shuf_label = "🔀 ON" if st.session_state.shuffle else "🔀 SHUF"
+            shuf_label = "🔀 ON" if st.session_state.shuffle else "🔀 셔플"
             if st.button(shuf_label, use_container_width=True, key="deck_shuffle", help="셔플 모드"):
                 st.session_state.shuffle = not st.session_state.shuffle
                 st.rerun()
@@ -1018,12 +1024,10 @@ with deck_col_player:
                 st.session_state.show_lyrics_drawer = not st.session_state.show_lyrics_drawer
                 st.rerun()
         with c_fav:
-            st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
             if st.button("★ FAV" if is_favorite(st.session_state.url) else "☆ FAV", use_container_width=True, key="deck_fav", help="즐겨찾기 토글"):
                 if st.session_state.url:
                     toggle_favorite(st.session_state.title, st.session_state.url)
                     st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
     else:
         st.markdown('<div class="video-cinema-deck">', unsafe_allow_html=True)
@@ -1053,21 +1057,19 @@ with deck_col_player:
             ''', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        c_v_prev, c_v_play, c_v_next, c_v_shuf, c_v_rep, c_v_fav = st.columns([1.0, 1.3, 1.0, 0.9, 0.9, 0.9])
+        c_v_prev, c_v_play, c_v_next, c_v_shuf, c_v_rep, c_v_fav = st.columns([1.0, 1.35, 1.0, 1.0, 1.0, 0.9], vertical_alignment="center")
         with c_v_prev:
             if st.button("⏮ PREV", use_container_width=True, key="v_deck_prev"):
                 play_prev()
         with c_v_play:
-            st.markdown('<div class="btn-primary">', unsafe_allow_html=True)
-            if st.button("⏸ PAUSE" if is_active else "▶ PLAY", use_container_width=True, key="v_deck_play"):
+            if st.button("⏸ PAUSE" if is_active else "▶ PLAY", use_container_width=True, key="v_deck_play", type="primary"):
                 st.session_state.is_playing = not st.session_state.is_playing
                 st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
         with c_v_next:
             if st.button("NEXT ⏭", use_container_width=True, key="v_deck_next"):
                 play_next()
         with c_v_shuf:
-            shuf_label = "🔀 ON" if st.session_state.shuffle else "🔀 SHUF"
+            shuf_label = "🔀 ON" if st.session_state.shuffle else "🔀 셔플"
             if st.button(shuf_label, use_container_width=True, key="v_deck_shuffle"):
                 st.session_state.shuffle = not st.session_state.shuffle
                 st.rerun()
@@ -1078,12 +1080,10 @@ with deck_col_player:
                 st.session_state.repeat_mode = next_mode_map[st.session_state.repeat_mode]
                 st.rerun()
         with c_v_fav:
-            st.markdown('<div class="btn-fav">', unsafe_allow_html=True)
             if st.button("★ FAV" if is_favorite(st.session_state.url) else "☆ FAV", use_container_width=True, key="v_deck_fav"):
                 if st.session_state.url:
                     toggle_favorite(st.session_state.title, st.session_state.url)
                     st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
 
 with deck_col_queue:
     st.markdown(f"""
