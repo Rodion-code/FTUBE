@@ -4,6 +4,7 @@ import json
 import random
 import re
 import time
+import xml.etree.ElementTree as ET
 from collections import Counter
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -38,6 +39,15 @@ DEFAULT_SESSION_STATES: Dict[str, Any] = {
     "show_theme_selector": False,
     "current_lyrics": None,
     "lcd_theme": "green",
+    "selected_channel_id": None,
+    "cached_playlists": None,
+    "cached_favorites": None,
+    "cached_history": None,
+    "cached_channels": None,
+    "cached_keywords": None,
+    "cached_recommendations": None,
+    "cached_rec_keyword": "",
+    "local_channels": [],
 }
 
 def init_session_state() -> None:
@@ -377,36 +387,51 @@ def get_current_user_id() -> Optional[str]:
     user = st.session_state.get("user")
     return user["id"] if user else None
 
-def get_favorites() -> List[Dict[str, Any]]:
+def get_favorites(force_refresh: bool = False) -> List[Dict[str, Any]]:
     user_id = get_current_user_id()
     if not user_id:
         return []
-    res = supabase.table("favorites").select("*").eq("user_id", user_id).order("id", desc=True).execute()
-    return res.data or []
+    if not force_refresh and st.session_state.get("cached_favorites") is not None:
+        return st.session_state.cached_favorites
+    try:
+        res = supabase.table("favorites").select("*").eq("user_id", user_id).order("id", desc=True).execute()
+        st.session_state.cached_favorites = res.data or []
+    except Exception:
+        st.session_state.cached_favorites = st.session_state.get("cached_favorites") or []
+    return st.session_state.cached_favorites
 
 def toggle_favorite(title: str, url: str) -> None:
     user_id = get_current_user_id()
     if not user_id or not url:
         return
-    existing = supabase.table("favorites").select("id").eq("user_id", user_id).eq("url", url).execute()
-    if existing.data:
-        supabase.table("favorites").delete().eq("id", existing.data[0]["id"]).execute()
-    else:
-        supabase.table("favorites").insert({"user_id": user_id, "title": title, "url": url}).execute()
+    try:
+        existing = supabase.table("favorites").select("id").eq("user_id", user_id).eq("url", url).execute()
+        if existing.data:
+            supabase.table("favorites").delete().eq("id", existing.data[0]["id"]).execute()
+        else:
+            supabase.table("favorites").insert({"user_id": user_id, "title": title, "url": url}).execute()
+    except Exception:
+        pass
+    get_favorites(force_refresh=True)
 
 def is_favorite(url: str) -> bool:
-    user_id = get_current_user_id()
-    if not user_id or not url:
+    if not url:
         return False
-    res = supabase.table("favorites").select("id").eq("user_id", user_id).eq("url", url).execute()
-    return bool(res.data)
+    favs = get_favorites()
+    return any(f.get("url") == url for f in favs)
 
-def get_playlists() -> List[Dict[str, Any]]:
+def get_playlists(force_refresh: bool = False) -> List[Dict[str, Any]]:
     user_id = get_current_user_id()
     if not user_id:
         return []
-    res = supabase.table("playlists").select("*").eq("user_id", user_id).order("id", desc=True).execute()
-    return res.data or []
+    if not force_refresh and st.session_state.get("cached_playlists") is not None:
+        return st.session_state.cached_playlists
+    try:
+        res = supabase.table("playlists").select("*").eq("user_id", user_id).order("id", desc=True).execute()
+        st.session_state.cached_playlists = res.data or []
+    except Exception:
+        st.session_state.cached_playlists = st.session_state.get("cached_playlists") or []
+    return st.session_state.cached_playlists
 
 def add_track_to_playlist(playlist_id: int, track: Dict[str, Any]) -> bool:
     user_id = get_current_user_id()
@@ -427,6 +452,7 @@ def add_track_to_playlist(playlist_id: int, track: Dict[str, Any]) -> bool:
         "channel": track.get("channel", ""),
     })
     supabase.table("playlists").update({"items": json.dumps(items, ensure_ascii=False)}).eq("id", playlist_id).execute()
+    get_playlists(force_refresh=True)
     return True
 
 def remove_track_from_playlist(playlist_id: int, track_url: str) -> None:
@@ -439,20 +465,193 @@ def remove_track_from_playlist(playlist_id: int, track_url: str) -> None:
     items = json.loads(res.data[0].get("items") or "[]")
     updated_items = [item for item in items if item.get("url") != track_url]
     supabase.table("playlists").update({"items": json.dumps(updated_items, ensure_ascii=False)}).eq("id", playlist_id).execute()
+    get_playlists(force_refresh=True)
 
-def get_history(limit: int = 50) -> List[Dict[str, Any]]:
+def get_history(limit: int = 50, force_refresh: bool = False) -> List[Dict[str, Any]]:
     user_id = get_current_user_id()
     if not user_id:
         return []
-    res = supabase.table("history").select("*").eq("user_id", user_id).order("watched_at", desc=True).limit(limit).execute()
-    return res.data or []
+    if not force_refresh and st.session_state.get("cached_history") is not None:
+        return st.session_state.cached_history
+    try:
+        res = supabase.table("history").select("*").eq("user_id", user_id).order("watched_at", desc=True).limit(limit).execute()
+        st.session_state.cached_history = res.data or []
+    except Exception:
+        st.session_state.cached_history = st.session_state.get("cached_history") or []
+    return st.session_state.cached_history
 
-def get_keywords() -> List[Dict[str, Any]]:
+def get_keywords(force_refresh: bool = False) -> List[Dict[str, Any]]:
     user_id = get_current_user_id()
     if not user_id:
         return []
-    res = supabase.table("keywords").select("*").eq("user_id", user_id).execute()
-    return res.data or []
+    if not force_refresh and st.session_state.get("cached_keywords") is not None:
+        return st.session_state.cached_keywords
+    try:
+        res = supabase.table("keywords").select("*").eq("user_id", user_id).execute()
+        st.session_state.cached_keywords = res.data or []
+    except Exception:
+        st.session_state.cached_keywords = st.session_state.get("cached_keywords") or []
+    return st.session_state.cached_keywords
+
+def get_user_channels(force_refresh: bool = False) -> List[Dict[str, Any]]:
+    user_id = get_current_user_id()
+    if not user_id:
+        return []
+    if not force_refresh and st.session_state.get("cached_channels") is not None:
+        return st.session_state.cached_channels
+    try:
+        res = supabase.table("channels").select("*").eq("user_id", user_id).order("id", desc=True).execute()
+        st.session_state.cached_channels = res.data or []
+    except Exception:
+        if "local_channels" not in st.session_state:
+            st.session_state.local_channels = []
+        st.session_state.cached_channels = st.session_state.local_channels
+    return st.session_state.cached_channels
+
+def add_user_channel(channel_info: Dict[str, Any]) -> bool:
+    user_id = get_current_user_id()
+    if not user_id or not channel_info.get("channel_id"):
+        return False
+    curr_channels = get_user_channels()
+    if any(c.get("channel_id") == channel_info["channel_id"] for c in curr_channels):
+        return False
+    try:
+        supabase.table("channels").insert({
+            "user_id": user_id,
+            "channel_id": channel_info["channel_id"],
+            "channel_name": channel_info.get("name", "Unknown Channel"),
+            "handle": channel_info.get("handle", ""),
+            "avatar": channel_info.get("avatar", ""),
+        }).execute()
+    except Exception:
+        if "local_channels" not in st.session_state:
+            st.session_state.local_channels = []
+        st.session_state.local_channels.insert(0, {
+            "id": int(time.time()),
+            "user_id": user_id,
+            "channel_id": channel_info["channel_id"],
+            "channel_name": channel_info.get("name", "Unknown Channel"),
+            "handle": channel_info.get("handle", ""),
+            "avatar": channel_info.get("avatar", ""),
+        })
+    get_user_channels(force_refresh=True)
+    return True
+
+def remove_user_channel(channel_id: str) -> None:
+    user_id = get_current_user_id()
+    if not user_id:
+        return
+    try:
+        supabase.table("channels").delete().eq("user_id", user_id).eq("channel_id", channel_id).execute()
+    except Exception:
+        if "local_channels" in st.session_state:
+            st.session_state.local_channels = [c for c in st.session_state.local_channels if c.get("channel_id") != channel_id]
+    get_user_channels(force_refresh=True)
+
+def resolve_youtube_channel(channel_input: str) -> Optional[Dict[str, Any]]:
+    if not channel_input or not channel_input.strip():
+        return None
+    raw = channel_input.strip()
+
+    # Direct channel ID check (UC...)
+    direct_match = re.search(r"(UC[A-Za-z0-9_-]{22})", raw)
+    if direct_match:
+        channel_id = direct_match.group(1)
+        try:
+            rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+            res = requests.get(rss_url, timeout=5)
+            if res.status_code == 200:
+                root = ET.fromstring(res.content)
+                title_elem = root.find("{http://www.w3.org/2005/Atom}title")
+                author_elem = root.find("{http://www.w3.org/2005/Atom}author/{http://www.w3.org/2005/Atom}name")
+                name = (title_elem.text if title_elem is not None else None) or (author_elem.text if author_elem is not None else None) or channel_id
+                return {"channel_id": channel_id, "name": name, "handle": f"@{name}", "avatar": ""}
+        except Exception:
+            return {"channel_id": channel_id, "name": channel_id, "handle": "", "avatar": ""}
+
+    # Handle or URL parsing
+    handle_match = re.search(r"(@[A-Za-z0-9_.-]+)", raw)
+    handle = handle_match.group(1) if handle_match else ("@" + raw.lstrip("@/ "))
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+    target_url = f"https://www.youtube.com/{handle}" if not raw.startswith("http") else raw
+    try:
+        res = requests.get(target_url, headers=headers, timeout=5)
+        if res.status_code != 200:
+            return None
+        text = res.text
+        
+        cid_match = re.search(r'"channelId":"(UC[A-Za-z0-9_-]{22})"', text) or re.search(r'"externalId":"(UC[A-Za-z0-9_-]{22})"', text) or re.search(r'itemprop="channelId"\s+content="(UC[A-Za-z0-9_-]{22})"', text)
+        if not cid_match:
+            return None
+        channel_id = cid_match.group(1)
+        
+        name_match = re.search(r'<meta property="og:title" content="([^"]+)">', text) or re.search(r'"channelMetadataRenderer":\{"title":"([^"]+)"', text)
+        channel_name = name_match.group(1) if name_match else handle
+        
+        avatar_match = re.search(r'<meta property="og:image" content="([^"]+)">', text)
+        avatar = avatar_match.group(1) if avatar_match else ""
+        
+        return {
+            "channel_id": channel_id,
+            "name": channel_name,
+            "handle": handle,
+            "avatar": avatar,
+        }
+    except Exception:
+        return None
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_channel_videos(channel_id: str) -> List[Dict[str, Any]]:
+    if not channel_id:
+        return []
+    rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    try:
+        res = requests.get(rss_url, timeout=5)
+        if res.status_code != 200:
+            return []
+        root = ET.fromstring(res.content)
+        ns = {
+            "atom": "http://www.w3.org/2005/Atom",
+            "yt": "http://www.youtube.com/xml/schemas/2015",
+            "media": "http://search.yahoo.com/mrss/",
+        }
+        
+        videos = []
+        for entry in root.findall("atom:entry", ns):
+            vid_elem = entry.find("yt:videoId", ns)
+            if vid_elem is None or not vid_elem.text:
+                continue
+            video_id = vid_elem.text
+            title_elem = entry.find("atom:title", ns)
+            title = title_elem.text if title_elem is not None and title_elem.text else "Untitled"
+            author_elem = entry.find("atom:author/atom:name", ns)
+            channel = author_elem.text if author_elem is not None and author_elem.text else ""
+            
+            published_elem = entry.find("atom:published", ns)
+            published = published_elem.text[:10] if published_elem is not None and published_elem.text else ""
+            
+            parsed = smart_parse_title(title)
+            artist = parsed["artist"] if parsed["artist"] != "Audio Track" else (channel or "Channel Track")
+            is_music = is_music_track(title, channel=channel, tags=parsed["tags"])
+            
+            videos.append({
+                "id": video_id,
+                "raw_title": title,
+                "title": parsed["song"],
+                "artist": artist,
+                "tags": parsed["tags"],
+                "channel": channel,
+                "duration": published,
+                "url": build_youtube_url(video_id),
+                "is_music": is_music,
+            })
+        return videos
+    except Exception:
+        return []
 
 def build_youtube_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={video_id}"
@@ -623,18 +822,28 @@ STOPWORDS = {
     "the", "a", "an", "in", "of", "to", "is", "on", "at", "by", "for"
 }
 
-def get_recommendations() -> Tuple[List[Dict[str, Any]], str]:
+def get_recommendations(force_refresh: bool = False) -> Tuple[List[Dict[str, Any]], str]:
+    if not force_refresh and st.session_state.get("cached_recommendations"):
+        return st.session_state.cached_recommendations, st.session_state.get("cached_rec_keyword", "음악")
+        
     user_keywords = get_keywords()
     if user_keywords:
         top_keyword = " ".join([k["keyword"] for k in user_keywords[:3]])
         results = search_youtube_raw(top_keyword, max_items=12)
         if results:
+            st.session_state.cached_recommendations = results
+            st.session_state.cached_rec_keyword = top_keyword
             return results, top_keyword
+            
     history = get_history(30)
     favorites = get_favorites()
     all_titles = [h["title"] for h in history] + [f["title"] for f in favorites]
     if not all_titles:
-        return search_youtube_raw("인기 노래 플레이리스트", max_items=12), "인기 음악 추천"
+        results = search_youtube_raw("인기 노래 플레이리스트", max_items=12)
+        st.session_state.cached_recommendations = results
+        st.session_state.cached_rec_keyword = "인기 음악 추천"
+        return results, "인기 음악 추천"
+        
     words = [
         word for title in all_titles
         for word in title.split()
@@ -642,7 +851,10 @@ def get_recommendations() -> Tuple[List[Dict[str, Any]], str]:
     ]
     top_words = [word for word, _ in Counter(words).most_common(2)]
     keyword = " ".join(top_words) if top_words else "음악"
-    return search_youtube_raw(f"{keyword} 노래", max_items=12), keyword
+    results = search_youtube_raw(f"{keyword} 노래", max_items=12)
+    st.session_state.cached_recommendations = results
+    st.session_state.cached_rec_keyword = keyword
+    return results, keyword
 
 
 def play_track(track: Dict[str, Any], queue_list: Optional[List[Dict[str, Any]]] = None, pos: Optional[int] = None) -> None:
@@ -676,6 +888,7 @@ def play_track(track: Dict[str, Any], queue_list: Optional[List[Dict[str, Any]]]
                 "title": f"{track_title} - {track_artist}",
                 "url": track_url,
             }).execute()
+            st.session_state.cached_history = None
         except Exception:
             pass
     st.rerun()
@@ -1166,9 +1379,11 @@ if st.session_state.show_lyrics_drawer:
 user_playlists = get_playlists()
 fav_list = get_favorites()
 history_list = get_history(30)
+user_channels = get_user_channels()
 
-tab_rec, tab_search, tab_pl, tab_fav, tab_hist, tab_url = st.tabs([
+tab_rec, tab_search, tab_channel, tab_pl, tab_fav, tab_hist, tab_url = st.tabs([
     "🎧 추천 음악", "🔍 음원 & 영상 검색",
+    f"📺 채널 피드 ({len(user_channels)})",
     f"📂 플레이리스트 ({len(user_playlists)})", f"★ 즐겨찾기 ({len(fav_list)})",
     f"🕒 청취 기록 ({len(history_list)})", "🔗 URL 직접입력",
 ])
@@ -1202,6 +1417,79 @@ with tab_search:
         st.caption(f"'{st.session_state.search_query}' 검색 결과: 총 {len(filtered_search)}건")
         for idx, trk in enumerate(filtered_search):
             render_track_row(idx, trk, key_prefix="search", user_playlists=user_playlists)
+
+with tab_channel:
+    st.markdown('<div class="section-title">SUBSCRIBED YOUTUBE CHANNELS & FEEDS</div>', unsafe_allow_html=True)
+    with st.form("add_channel_form"):
+        col_ch_in, col_ch_btn = st.columns([3.8, 1.2])
+        with col_ch_in:
+            ch_input = st.text_input("", placeholder="유튜브 채널 @핸들 (예: @yoasobi_staff_, @Ado1024) 또는 채널 링크 입력", label_visibility="collapsed")
+        with col_ch_btn:
+            add_ch_submit = st.form_submit_button("+ 채널 등록", use_container_width=True)
+            
+        if add_ch_submit and ch_input.strip():
+            with st.spinner("채널 정보 확인 중..."):
+                resolved = resolve_youtube_channel(ch_input.strip())
+                if resolved:
+                    success = add_user_channel(resolved)
+                    if success:
+                        st.session_state.selected_channel_id = resolved["channel_id"]
+                        st.toast(f"'{resolved['name']}' 채널이 등록되었습니다!")
+                        st.rerun()
+                    else:
+                        st.toast("이미 등록된 채널이거나 추가에 실패했습니다.")
+                else:
+                    st.error("채널을 찾을 수 없습니다. @핸들 또는 채널 링크를 확인해주세요.")
+
+    if not user_channels:
+        st.markdown("""
+        <div class="empty-msg">
+            등록된 유튜브 채널이 없습니다.<br>
+            좋아하는 우타이테, 아티스트, 버튜버의 <b>@핸들</b>을 등록하고 최신 음원을 실시간으로 감상하세요!
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        if not st.session_state.selected_channel_id or not any(c["channel_id"] == st.session_state.selected_channel_id for c in user_channels):
+            st.session_state.selected_channel_id = user_channels[0]["channel_id"]
+            
+        col_chips = st.columns(min(len(user_channels), 4))
+        for c_idx, ch in enumerate(user_channels):
+            col_target = col_chips[c_idx % min(len(user_channels), 4)]
+            with col_target:
+                is_selected = st.session_state.selected_channel_id == ch["channel_id"]
+                btn_type = "primary" if is_selected else "secondary"
+                btn_prefix = "▶ " if is_selected else "📺 "
+                if st.button(f"{btn_prefix}{ch.get('channel_name', 'Channel')[:12]}", key=f"ch_sel_{ch['channel_id']}", type=btn_type, use_container_width=True):
+                    st.session_state.selected_channel_id = ch["channel_id"]
+                    st.rerun()
+                    
+        active_ch = next((c for c in user_channels if c["channel_id"] == st.session_state.selected_channel_id), user_channels[0])
+        col_info, col_del = st.columns([4, 1], vertical_alignment="center")
+        with col_info:
+            st.markdown(f"""
+            <div style="background:rgba(22,30,48,0.7);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 16px;margin:10px 0;display:flex;align-items:center;justify-content:space-between;">
+                <div>
+                    <span style="font-size:1.05rem;font-weight:700;color:var(--lcd-acc);">📺 {active_ch.get('channel_name')}</span>
+                    <span style="font-size:0.78rem;color:#94a3b8;margin-left:8px;font-family:'Share Tech Mono';">{active_ch.get('handle', '')}</span>
+                </div>
+                <div style="font-size:0.75rem;color:#60a5fa;font-family:'Share Tech Mono';">LATEST UPLOADS (RSS FEED)</div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_del:
+            if st.button("🗑 채널 삭제", key=f"del_ch_{active_ch['channel_id']}", use_container_width=True):
+                remove_user_channel(active_ch["channel_id"])
+                st.session_state.selected_channel_id = None
+                st.toast(f"'{active_ch.get('channel_name')}' 채널이 삭제되었습니다.")
+                st.rerun()
+                
+        channel_videos = fetch_channel_videos(active_ch["channel_id"])
+        if not channel_videos:
+            st.markdown('<div class="empty-msg">채널의 최신 영상을 불러오지 못했습니다.</div>', unsafe_allow_html=True)
+        else:
+            filtered_ch_videos = [t for t in channel_videos if t.get("is_music", True)] if is_mp3_mode else channel_videos
+            st.caption(f"'{active_ch.get('channel_name')}' 최신 업로드 ({len(filtered_ch_videos)}개)")
+            for idx, trk in enumerate(filtered_ch_videos):
+                render_track_row(idx, trk, key_prefix="ch_feed", user_playlists=user_playlists)
 
 with tab_pl:
     st.markdown('<div class="section-title">MY PLAYLISTS</div>', unsafe_allow_html=True)
