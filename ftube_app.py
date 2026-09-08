@@ -1430,6 +1430,40 @@ with deck_col_player:
                     toggle_favorite(st.session_state.title, st.session_state.url)
                     st.rerun()
 
+        # --- MP3 Download Row ---
+        if is_active and st.session_state.url:
+            st.markdown("""
+            <div style="margin-top:10px;padding:10px 14px;background:rgba(15,23,42,0.5);
+                        border:1px solid rgba(96,165,250,0.2);border-radius:12px;
+                        display:flex;align-items:center;gap:10px;">
+                <div style="font-family:'Share Tech Mono',monospace;font-size:0.72rem;color:#60a5fa;letter-spacing:0.1em;">
+                    💾 MP3 EXPORT
+                </div>
+                <div style="font-size:0.78rem;color:#94a3b8;">
+                    현재 트랙을 192kbps MP3로 추출합니다. yt-dlp + FFmpeg 처리 (수십 초 소요)
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            dl_col_btn, dl_col_info = st.columns([1.2, 3])
+            with dl_col_btn:
+                if st.button("⬇ MP3 다운로드", use_container_width=True, key="deck_mp3_download_btn", help="현재 재생 중인 트랙을 MP3로 저장"):
+                    dl_title = st.session_state.title or "audio"
+                    dl_url = st.session_state.url
+                    with st.spinner(f"🔄 '{dl_title}' MP3 변환 중... (잠시만 기다려주세요)"):
+                        mp3_data = download_mp3_from_youtube(dl_url, dl_title)
+                    if mp3_data:
+                        safe_name = re.sub(r'[\\/:*?"<>|]', "", dl_title).strip() or "audio"
+                        st.download_button(
+                            label=f"📥 '{safe_name}.mp3' 저장",
+                            data=mp3_data,
+                            file_name=f"{safe_name}.mp3",
+                            mime="audio/mpeg",
+                            key="deck_mp3_save_btn",
+                            use_container_width=True,
+                        )
+                        st.toast(f"'{safe_name}.mp3' 변환 완료! 저장 버튼을 눌러주세요.")
+
+
     else:
         st.markdown('<div class="video-cinema-deck">', unsafe_allow_html=True)
         if is_active and current_vid_id:
