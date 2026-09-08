@@ -773,6 +773,29 @@ def render_track_row(
 
 if not st.session_state.user:
     st.markdown("""
+    <style>
+    /* Lock scrolling on authentication view */
+    html, body, [data-testid="stAppViewContainer"], .stApp {
+        overflow: hidden !important;
+        height: 100vh !important;
+        max-height: 100vh !important;
+    }
+    [data-testid="block-container"] {
+        padding-top: 16px !important;
+        padding-bottom: 0px !important;
+        max-height: 100vh !important;
+    }
+    .ftube-top-bar {
+        margin-bottom: 14px !important;
+        padding: 10px 18px !important;
+    }
+    div[data-testid="stForm"] {
+        padding: 16px 20px !important;
+    }
+    div[data-testid="stForm"] .stTextInput {
+        margin-bottom: -6px !important;
+    }
+    </style>
     <div class="ftube-top-bar">
         <div class="brand-group">
             <div class="brand-logo-text">🎵 FTUBE <span>HYBRID</span></div>
@@ -782,13 +805,13 @@ if not st.session_state.user:
     </div>
     """, unsafe_allow_html=True)
 
-    col_l, col_auth, col_r = st.columns([1, 1.35, 1])
+    col_l, col_auth, col_r = st.columns([1, 1.3, 1])
     with col_auth:
         if st.session_state.auth_mode == "login":
             st.markdown("""
-            <div style="text-align: center; margin-top: 8px; margin-bottom: 16px;">
-                <div style="font-size: 1.3rem; font-weight: 800; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 4px;">✨ 플레이어 로그인</div>
-                <div style="font-family: 'Share Tech Mono', monospace; font-size: 0.76rem; color: #94a3b8; letter-spacing: 0.05em;">FTUBE 미디어 엔진에 오신 것을 환영합니다</div>
+            <div style="text-align: center; margin-top: 4px; margin-bottom: 12px;">
+                <div style="font-size: 1.25rem; font-weight: 800; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 2px;">✨ 플레이어 로그인</div>
+                <div style="font-family: 'Share Tech Mono', monospace; font-size: 0.74rem; color: #94a3b8; letter-spacing: 0.05em;">FTUBE 미디어 엔진에 오신 것을 환영합니다</div>
             </div>
             """, unsafe_allow_html=True)
             with st.form("login_form"):
@@ -812,9 +835,9 @@ if not st.session_state.user:
                 st.rerun()
         else:
             st.markdown("""
-            <div style="text-align: center; margin-top: 8px; margin-bottom: 16px;">
-                <div style="font-size: 1.3rem; font-weight: 800; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 4px;">✨ 새 계정 등록</div>
-                <div style="font-family: 'Share Tech Mono', monospace; font-size: 0.76rem; color: #94a3b8; letter-spacing: 0.05em;">플레이리스트와 즐겨찾기를 저장하세요</div>
+            <div style="text-align: center; margin-top: 4px; margin-bottom: 12px;">
+                <div style="font-size: 1.25rem; font-weight: 800; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 2px;">✨ 새 계정 등록</div>
+                <div style="font-family: 'Share Tech Mono', monospace; font-size: 0.74rem; color: #94a3b8; letter-spacing: 0.05em;">플레이리스트와 즐겨찾기를 저장하세요</div>
             </div>
             """, unsafe_allow_html=True)
             with st.form("reg_form"):
