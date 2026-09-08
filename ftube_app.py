@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 import hashlib
+import io
 import json
+import os
 import random
 import re
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -11,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+import yt_dlp
 from supabase import Client, create_client
 
 st.set_page_config(page_title="FTUBE - Audio & Cinema", page_icon="🎵", layout="wide")
@@ -281,9 +285,10 @@ html, body, [data-testid="stAppViewContainer"], .stApp {{
 .video-channel-text {{ font-size: 0.85rem; color: #94a3b8; margin-top: 3px; }}
 
 .hidden-audio-frame {{
-    position: absolute !important; left: -9999px !important; top: -9999px !important;
+    position: fixed !important; left: 0 !important; top: 0 !important;
     width: 1px !important; height: 1px !important;
-    opacity: 0 !important; pointer-events: none !important; visibility: hidden !important;
+    opacity: 0.01 !important; pointer-events: none !important;
+    z-index: -9999 !important; border: none !important;
 }}
 
 .track-row {{
@@ -873,6 +878,61 @@ def search_youtube_raw(query: str, max_items: int = 25) -> List[Dict[str, Any]]:
         return results
     except Exception:
         return []
+
+
+
+def download_mp3_from_youtube(youtube_url: str, title: str) -> Optional[bytes]:
+    """Download audio from YouTube and return MP3 bytes using yt-dlp with android client."""
+    safe_title = re.sub(r'[\\/:*?"<>|]', "", title).strip() or "audio"
+    tmpdir = tempfile.mkdtemp(prefix="ftube_dl_")
+    outtmpl = os.path.join(tmpdir, "%(title)s.%(ext)s")
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": outtmpl,
+        "quiet": True,
+        "no_warnings": True,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"],
+            }
+        },
+        "postprocessors": [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "192",
+            }
+        ],
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(youtube_url, download=True)
+            dl_title = re.sub(r'[\\/:*?"<>|]', "", info.get("title", safe_title)).strip()
+            mp3_path = os.path.join(tmpdir, f"{dl_title}.mp3")
+            # yt-dlp sometimes names it differently, find the .mp3
+            if not os.path.exists(mp3_path):
+                for fname in os.listdir(tmpdir):
+                    if fname.endswith(".mp3"):
+                        mp3_path = os.path.join(tmpdir, fname)
+                        break
+            if os.path.exists(mp3_path):
+                with open(mp3_path, "rb") as f:
+                    mp3_bytes = f.read()
+                # Cleanup
+                try:
+                    import shutil
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                except Exception:
+                    pass
+                return mp3_bytes
+    except Exception as e:
+        try:
+            import shutil
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            pass
+        st.error(f"다운로드 실패: {e}")
+    return None
 
 
 STOPWORDS = {
