@@ -655,6 +655,7 @@ def fetch_channel_videos(channel_id: str, channel_name: str = "") -> List[Dict[s
                 
                 parsed = smart_parse_title(title)
                 artist = parsed["artist"] if parsed["artist"] != "Audio Track" else (channel or "Channel Track")
+                is_music = is_music_track(title, channel=channel, tags=parsed["tags"])
                 
                 videos.append({
                     "id": video_id,
@@ -665,7 +666,7 @@ def fetch_channel_videos(channel_id: str, channel_name: str = "") -> List[Dict[s
                     "channel": channel,
                     "duration": published,
                     "url": build_youtube_url(video_id),
-                    "is_music": True,
+                    "is_music": is_music,
                 })
     except Exception:
         pass
@@ -674,7 +675,6 @@ def fetch_channel_videos(channel_id: str, channel_name: str = "") -> List[Dict[s
     if not videos and channel_name:
         fallback_results = search_youtube_raw(f"{channel_name}", max_items=20)
         for trk in fallback_results:
-            trk["is_music"] = True
             videos.append(trk)
 
     return videos
@@ -683,36 +683,69 @@ def build_youtube_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={video_id}"
 
 
-MUSIC_KEYWORDS = (
+STRONG_MUSIC_KEYWORDS = (
     "cover", "커버", "歌ってみた", "우타이테", "utaite",
-    "official", "원곡", "mv", "m/v", "music video", "뮤직비디오",
+    "mv", "m/v", "music video", "뮤직비디오", "official mv", "official audio", "official video",
     "음악", "노래", "song", "album", "앨범", "ost", "soundtrack", "bgm",
-    "remix", "리믹스", "mix", "lofi", "로파이", "chill",
-    "live", "라이브", "concert", "콘서트", "acoustic", "어쿠스틱",
-    "asmr", "flac", "audio", "오디오", "lyric", "가사", "full ver",
-    "vocal", "보컬", "playlist", "플레이리스트", "track", "feat",
-    "싱글", "single", "ep", "instrumental", "inst",
+    "remix", "리믹스", "lofi", "로파이", "acoustic", "어쿠스틱",
+    "flac", "가사", "full ver", "full ver.", "vocal", "보컬",
+    "playlist", "플레이리스트", "inst", "instrumental", "singing", "karaoke",
+    "노래방", "가창", "작곡", "작사", "음원", "track", "feat.", "feat", "single", "싱글", "ep",
+    "노래방송", "우타와꾸", "singing stream",
 )
 
-def is_music_track(title: str, channel: str = "", tags: Optional[List[str]] = None) -> bool:
-    if tags:
-        return True
-    combined_text = f"{title} {channel}".lower()
-    return any(keyword in combined_text for keyword in MUSIC_KEYWORDS)
-
+NON_MUSIC_KEYWORDS = (
+    "gameplay", "walkthrough", "playthrough", "실황", "게임", "하이라이트", "다시보기",
+    "vlog", "브이로그", "리뷰", "review", "먹방", "mukbang", "unboxing", "언박싱",
+    "토크", "talk", "잡담", "뉴스", "news", "강의", "lecture", "tutorial", "튜토리얼",
+    "반응", "reaction", "shorts", "쇼츠", "q&a", "공지", "notice", "월드컵", "이상형월드컵",
+    "챌린지", "challenge", "trailer", "트레일러", "티저", "teaser", "예고편", "영화", "movie",
+    "drama", "드라마", "animation", "애니메이션", "highlight", "클립", "clip",
+    "생방송", "livestream", "소통",
+)
 
 TAG_KEYWORDS = {
     "COVER": ("cover", "커버", "歌ってみた", "우타이테"),
-    "ORIGINAL": ("official", "원곡", "mv", "m/v", "music video"),
-    "LIVE": ("live", "라이브", "concert", "콘서트"),
-    "REMIX": ("remix", "리믹스", "mix"),
-    "BGM": ("lofi", "로파이", "bgm", "chill"),
-    "ACOUSTIC": ("asmr", "acoustic", "어쿠스틱"),
+    "ORIGINAL": ("official mv", "official music video", "원곡", "뮤직비디오", "m/v"),
+    "LIVE": ("live clip", "라이브 클립", "concert", "콘서트", "live stage", "stage mix"),
+    "REMIX": ("remix", "리믹스"),
+    "BGM": ("lofi", "로파이", "bgm", "chill hop", "chill beats"),
+    "ACOUSTIC": ("acoustic", "어쿠스틱", "unplugged"),
 }
 
 def analyze_title(title: str) -> List[str]:
     title_lower = title.lower()
     return [tag for tag, keywords in TAG_KEYWORDS.items() if any(kw in title_lower for kw in keywords)]
+
+def is_music_track(title: str, channel: str = "", tags: Optional[List[str]] = None) -> bool:
+    t_lower = title.lower()
+    c_lower = channel.lower()
+    
+    # 1. Check strong music keywords in title
+    has_strong_title = any(kw in t_lower for kw in STRONG_MUSIC_KEYWORDS)
+    
+    # 2. Check non-music keywords in title
+    has_non_music = any(kw in t_lower for kw in NON_MUSIC_KEYWORDS)
+    
+    if has_strong_title:
+        return True
+    if has_non_music:
+        return False
+        
+    # 3. Check tags
+    if tags:
+        music_tags = {"COVER", "ORIGINAL", "REMIX", "BGM", "ACOUSTIC", "LIVE"}
+        if any(t in music_tags for t in tags):
+            return True
+            
+    # 4. Check typical music title patterns
+    if any(sep in title for sep in (" - ", " – ", " — ", " / ", " | ")):
+        if any(mkw in c_lower for mkw in ("records", "music", "audio", "vevo", "sound", "band", "orchestra", "topic", "엔터테인먼트", "ent")):
+            return True
+        if any(mkw in t_lower for mkw in ("feat", "ft.", "prod.", "ver.", "mix", "theme", "op", "ed")):
+            return True
+
+    return False
 
 def smart_parse_title(raw_title: str) -> Dict[str, Any]:
     cleaned = raw_title.strip()
@@ -960,9 +993,12 @@ def render_track_row(
     artist = track.get("artist", "Unknown Artist")
     channel_info = f" · {track['channel']}" if track.get("channel") else ""
     duration = track.get("duration", "")
+    is_music = track.get("is_music")
+    if is_music is None:
+        is_music = is_music_track(track.get("raw_title") or track.get("title", ""), channel=track.get("channel", ""), tags=track.get("tags"))
     music_badge = (
         "<span class='track-tag-badge' style='color:#4ade80;border-color:rgba(74,222,128,0.3);'>🎵 MUSIC</span>"
-        if track.get("is_music", True)
+        if is_music
         else "<span class='track-tag-badge' style='color:#c084fc;border-color:rgba(192,132,252,0.3);'>🎬 VIDEO</span>"
     )
     st.markdown(f"""
@@ -1735,7 +1771,8 @@ with tab_fav:
         fav_queue = []
         for fav_item in fav_list:
             parsed = smart_parse_title(fav_item["title"])
-            fav_queue.append({"title": parsed["song"], "artist": parsed["artist"], "url": fav_item["url"], "tags": parsed["tags"]})
+            is_m = is_music_track(fav_item["title"], tags=parsed["tags"])
+            fav_queue.append({"title": parsed["song"], "artist": parsed["artist"], "url": fav_item["url"], "tags": parsed["tags"], "is_music": is_m})
         if st.button(f"▶ 즐겨찾기 전체 재생 ({len(fav_list)}곡)", use_container_width=True, key="fav_play_all"):
             play_track(fav_queue[0], queue_list=fav_queue, pos=0)
         for idx, fav_trk in enumerate(fav_queue):
@@ -1753,10 +1790,12 @@ with tab_hist:
                 st.rerun()
         for idx, hist_item in enumerate(history_list):
             parsed = smart_parse_title(hist_item["title"])
+            is_m = is_music_track(hist_item["title"], tags=parsed["tags"])
             hist_trk = {
                 "title": parsed["song"],
                 "artist": f"{parsed['artist']} · {hist_item.get('watched_at', '')[:10]}",
                 "url": hist_item["url"], "tags": parsed["tags"],
+                "is_music": is_m,
             }
             render_track_row(idx, hist_trk, key_prefix="hist", user_playlists=user_playlists, show_queue_add=True, show_fav_toggle=True, show_playlist_add=True, show_delete_btn=True, on_delete=lambda t, h_id=hist_item["id"]: supabase.table("history").delete().eq("id", h_id).execute())
 
