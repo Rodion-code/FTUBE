@@ -553,7 +553,7 @@ def resolve_youtube_channel(channel_input: str) -> Optional[Dict[str, Any]]:
         return None
     raw = channel_input.strip()
 
-    # Direct channel ID check (UC...)
+    # 1. Direct channel ID check (UC...)
     direct_match = re.search(r"(UC[A-Za-z0-9_-]{22})", raw)
     if direct_match:
         channel_id = direct_match.group(1)
@@ -569,89 +569,114 @@ def resolve_youtube_channel(channel_input: str) -> Optional[Dict[str, Any]]:
         except Exception:
             return {"channel_id": channel_id, "name": channel_id, "handle": "", "avatar": ""}
 
-    # Handle or URL parsing
-    handle_match = re.search(r"(@[A-Za-z0-9_.-]+)", raw)
-    handle = handle_match.group(1) if handle_match else ("@" + raw.lstrip("@/ "))
-    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
     }
-    target_url = f"https://www.youtube.com/{handle}" if not raw.startswith("http") else raw
+
+    # 2. Handle or URL parsing
+    if raw.startswith("http") or raw.startswith("@"):
+        handle_match = re.search(r"(@[A-Za-z0-9_.-]+)", raw)
+        handle = handle_match.group(1) if handle_match else ("@" + raw.lstrip("@/ "))
+        target_url = f"https://www.youtube.com/{handle}" if not raw.startswith("http") else raw
+        try:
+            res = requests.get(target_url, headers=headers, timeout=5)
+            if res.status_code == 200:
+                text = res.text
+                cid_match = re.search(r'<meta itemprop="channelId" content="(UC[A-Za-z0-9_-]{22})">', text) or \
+                            re.search(r'<link rel="canonical" href="https://www.youtube.com/channel/(UC[A-Za-z0-9_-]{22})">', text) or \
+                            re.search(r'"channelId":"(UC[A-Za-z0-9_-]{22})"', text)
+                if cid_match:
+                    channel_id = cid_match.group(1)
+                    name_match = re.search(r'<meta property="og:title" content="([^"]+)">', text) or re.search(r'"channelMetadataRenderer":\{"title":"([^"]+)"', text)
+                    channel_name = name_match.group(1) if name_match else handle
+                    return {"channel_id": channel_id, "name": channel_name, "handle": handle, "avatar": ""}
+        except Exception:
+            pass
+
+    # 3. Keyword / Name search for Channel
     try:
-        res = requests.get(target_url, headers=headers, timeout=5)
-        if res.status_code != 200:
-            return None
-        text = res.text
-        
-        cid_match = re.search(r'"channelId":"(UC[A-Za-z0-9_-]{22})"', text) or re.search(r'"externalId":"(UC[A-Za-z0-9_-]{22})"', text) or re.search(r'itemprop="channelId"\s+content="(UC[A-Za-z0-9_-]{22})"', text)
-        if not cid_match:
-            return None
-        channel_id = cid_match.group(1)
-        
-        name_match = re.search(r'<meta property="og:title" content="([^"]+)">', text) or re.search(r'"channelMetadataRenderer":\{"title":"([^"]+)"', text)
-        channel_name = name_match.group(1) if name_match else handle
-        
-        avatar_match = re.search(r'<meta property="og:image" content="([^"]+)">', text)
-        avatar = avatar_match.group(1) if avatar_match else ""
-        
-        return {
-            "channel_id": channel_id,
-            "name": channel_name,
-            "handle": handle,
-            "avatar": avatar,
-        }
+        encoded = requests.utils.quote(raw)
+        search_url = f"https://www.youtube.com/results?search_query={encoded}&sp=EgIQAg%253D%253D&hl=ko&gl=KR"
+        res = requests.get(search_url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            match = re.search(r"var ytInitialData\s*=\s*({.+?});</script>", res.text) or re.search(r'ytInitialData\s*=\s*({.+?});', res.text)
+            if match:
+                raw_json = json.loads(match.group(1))
+                stack = [raw_json]
+                while stack:
+                    curr = stack.pop()
+                    if isinstance(curr, dict):
+                        if "channelRenderer" in curr:
+                            rend = curr["channelRenderer"]
+                            cid = rend.get("channelId")
+                            if cid:
+                                title = rend.get("title", {}).get("simpleText") or rend.get("title", {}).get("runs", [{}])[0].get("text")
+                                handle = rend.get("subscriberCountText", {}).get("simpleText", "")
+                                return {"channel_id": cid, "name": title or raw, "handle": handle or f"@{raw}", "avatar": ""}
+                        stack.extend(curr.values())
+                    elif isinstance(curr, list):
+                        stack.extend(curr)
     except Exception:
-        return None
+        pass
+
+    return None
 
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_channel_videos(channel_id: str) -> List[Dict[str, Any]]:
+def fetch_channel_videos(channel_id: str, channel_name: str = "") -> List[Dict[str, Any]]:
     if not channel_id:
         return []
+    videos = []
+    
+    # 1. Try YouTube RSS feed
     rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
     try:
         res = requests.get(rss_url, timeout=5)
-        if res.status_code != 200:
-            return []
-        root = ET.fromstring(res.content)
-        ns = {
-            "atom": "http://www.w3.org/2005/Atom",
-            "yt": "http://www.youtube.com/xml/schemas/2015",
-            "media": "http://search.yahoo.com/mrss/",
-        }
-        
-        videos = []
-        for entry in root.findall("atom:entry", ns):
-            vid_elem = entry.find("yt:videoId", ns)
-            if vid_elem is None or not vid_elem.text:
-                continue
-            video_id = vid_elem.text
-            title_elem = entry.find("atom:title", ns)
-            title = title_elem.text if title_elem is not None and title_elem.text else "Untitled"
-            author_elem = entry.find("atom:author/atom:name", ns)
-            channel = author_elem.text if author_elem is not None and author_elem.text else ""
-            
-            published_elem = entry.find("atom:published", ns)
-            published = published_elem.text[:10] if published_elem is not None and published_elem.text else ""
-            
-            parsed = smart_parse_title(title)
-            artist = parsed["artist"] if parsed["artist"] != "Audio Track" else (channel or "Channel Track")
-            is_music = is_music_track(title, channel=channel, tags=parsed["tags"])
-            
-            videos.append({
-                "id": video_id,
-                "raw_title": title,
-                "title": parsed["song"],
-                "artist": artist,
-                "tags": parsed["tags"],
-                "channel": channel,
-                "duration": published,
-                "url": build_youtube_url(video_id),
-                "is_music": is_music,
-            })
-        return videos
+        if res.status_code == 200:
+            root = ET.fromstring(res.content)
+            ns = {
+                "atom": "http://www.w3.org/2005/Atom",
+                "yt": "http://www.youtube.com/xml/schemas/2015",
+                "media": "http://search.yahoo.com/mrss/",
+            }
+            for entry in root.findall("atom:entry", ns):
+                vid_elem = entry.find("yt:videoId", ns)
+                if vid_elem is None or not vid_elem.text:
+                    continue
+                video_id = vid_elem.text
+                title_elem = entry.find("atom:title", ns)
+                title = title_elem.text if title_elem is not None and title_elem.text else "Untitled"
+                author_elem = entry.find("atom:author/atom:name", ns)
+                channel = (author_elem.text if author_elem is not None and author_elem.text else "") or channel_name
+                
+                published_elem = entry.find("atom:published", ns)
+                published = published_elem.text[:10] if published_elem is not None and published_elem.text else ""
+                
+                parsed = smart_parse_title(title)
+                artist = parsed["artist"] if parsed["artist"] != "Audio Track" else (channel or "Channel Track")
+                
+                videos.append({
+                    "id": video_id,
+                    "raw_title": title,
+                    "title": parsed["song"],
+                    "artist": artist,
+                    "tags": parsed["tags"],
+                    "channel": channel,
+                    "duration": published,
+                    "url": build_youtube_url(video_id),
+                    "is_music": True,
+                })
     except Exception:
-        return []
+        pass
+
+    # 2. Fallback search if RSS had 0 videos
+    if not videos and channel_name:
+        fallback_results = search_youtube_raw(f"{channel_name}", max_items=20)
+        for trk in fallback_results:
+            trk["is_music"] = True
+            videos.append(trk)
+
+    return videos
 
 def build_youtube_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={video_id}"
@@ -1203,10 +1228,80 @@ with deck_col_player:
 
         if is_active and current_vid_id:
             st.markdown(f'''
-            <iframe class="hidden-audio-frame"
+            <iframe id="ftube_player_frame" class="hidden-audio-frame"
                 src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1"
                 allow="autoplay">
             </iframe>
+            <script>
+            (function() {{
+                var vid = "{current_vid_id}";
+                if (!vid) return;
+                var key = "ftube_play_pos_" + vid;
+                var savedPos = parseFloat(sessionStorage.getItem(key) || "0");
+                window._ftubeNextTriggered = false;
+
+                function triggerNextTrack() {{
+                    if (window._ftubeNextTriggered) return;
+                    window._ftubeNextTriggered = true;
+                    setTimeout(function() {{
+                        var btns = Array.from(document.querySelectorAll('button'));
+                        var nextBtn = btns.find(function(b) {{
+                            return b.textContent && b.textContent.includes('NEXT');
+                        }});
+                        if (nextBtn) {{
+                            nextBtn.click();
+                        }}
+                    }}, 400);
+                }}
+
+                function syncFrame() {{
+                    var frame = document.getElementById("ftube_player_frame");
+                    if (!frame || !frame.contentWindow) return;
+                    try {{
+                        frame.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*");
+                        if (savedPos > 1) {{
+                            setTimeout(function() {{
+                                frame.contentWindow.postMessage(JSON.stringify({{
+                                    "event": "command",
+                                    "func": "seekTo",
+                                    "args": [savedPos, true]
+                                }}), "*");
+                            }}, 700);
+                        }}
+                    }} catch(e) {{}}
+                }}
+
+                if (!window._ftubeMsgAttached) {{
+                    window._ftubeMsgAttached = true;
+                    window.addEventListener("message", function(e) {{
+                        try {{
+                            var data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
+                            if (!data) return;
+                            if (data.event === "infoDelivery" && data.info) {{
+                                var cTime = data.info.currentTime;
+                                if (typeof cTime === "number" && cTime > 0) {{
+                                    sessionStorage.setItem(key, cTime.toString());
+                                }}
+                                if (data.info.playerState === 0) {{
+                                    triggerNextTrack();
+                                }}
+                            }} else if (data.event === "onStateChange" && (data.info === 0 || data.data === 0)) {{
+                                triggerNextTrack();
+                            }}
+                        }} catch(err) {{}}
+                    }});
+                }}
+
+                syncFrame();
+                if (window._ftubeSyncInterval) clearInterval(window._ftubeSyncInterval);
+                window._ftubeSyncInterval = setInterval(function() {{
+                    var frame = document.getElementById("ftube_player_frame");
+                    if (frame && frame.contentWindow) {{
+                        try {{ frame.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*"); }} catch(e){{}}
+                    }}
+                }}, 1000);
+            }})();
+            </script>
             ''', unsafe_allow_html=True)
 
         c_prev, c_play, c_next, c_shuf, c_rep, c_lyr, c_fav = st.columns([1.0, 1.25, 1.0, 1.0, 1.0, 1.0, 0.9], vertical_alignment="center")
@@ -1247,10 +1342,80 @@ with deck_col_player:
         if is_active and current_vid_id:
             st.markdown(f'''
             <div class="video-wrapper">
-                <iframe src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0"
+                <iframe id="ftube_player_frame" src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0"
                     allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen>
                 </iframe>
             </div>
+            <script>
+            (function() {{
+                var vid = "{current_vid_id}";
+                if (!vid) return;
+                var key = "ftube_play_pos_" + vid;
+                var savedPos = parseFloat(sessionStorage.getItem(key) || "0");
+                window._ftubeNextTriggered = false;
+
+                function triggerNextTrack() {{
+                    if (window._ftubeNextTriggered) return;
+                    window._ftubeNextTriggered = true;
+                    setTimeout(function() {{
+                        var btns = Array.from(document.querySelectorAll('button'));
+                        var nextBtn = btns.find(function(b) {{
+                            return b.textContent && b.textContent.includes('NEXT');
+                        }});
+                        if (nextBtn) {{
+                            nextBtn.click();
+                        }}
+                    }}, 400);
+                }}
+
+                function syncFrame() {{
+                    var frame = document.getElementById("ftube_player_frame");
+                    if (!frame || !frame.contentWindow) return;
+                    try {{
+                        frame.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*");
+                        if (savedPos > 1) {{
+                            setTimeout(function() {{
+                                frame.contentWindow.postMessage(JSON.stringify({{
+                                    "event": "command",
+                                    "func": "seekTo",
+                                    "args": [savedPos, true]
+                                }}), "*");
+                            }}, 700);
+                        }}
+                    }} catch(e) {{}}
+                }}
+
+                if (!window._ftubeMsgAttached) {{
+                    window._ftubeMsgAttached = true;
+                    window.addEventListener("message", function(e) {{
+                        try {{
+                            var data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
+                            if (!data) return;
+                            if (data.event === "infoDelivery" && data.info) {{
+                                var cTime = data.info.currentTime;
+                                if (typeof cTime === "number" && cTime > 0) {{
+                                    sessionStorage.setItem(key, cTime.toString());
+                                }}
+                                if (data.info.playerState === 0) {{
+                                    triggerNextTrack();
+                                }}
+                            }} else if (data.event === "onStateChange" && (data.info === 0 || data.data === 0)) {{
+                                triggerNextTrack();
+                            }}
+                        }} catch(err) {{}}
+                    }});
+                }}
+
+                syncFrame();
+                if (window._ftubeSyncInterval) clearInterval(window._ftubeSyncInterval);
+                window._ftubeSyncInterval = setInterval(function() {{
+                    var frame = document.getElementById("ftube_player_frame");
+                    if (frame && frame.contentWindow) {{
+                        try {{ frame.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*"); }} catch(e){{}}
+                    }}
+                }}, 1000);
+            }})();
+            </script>
             <div class="video-meta-bar">
                 <div>
                     <div class="video-title-text">🎬 {current_title}</div>
@@ -1482,13 +1647,12 @@ with tab_channel:
                 st.toast(f"'{active_ch.get('channel_name')}' 채널이 삭제되었습니다.")
                 st.rerun()
                 
-        channel_videos = fetch_channel_videos(active_ch["channel_id"])
+        channel_videos = fetch_channel_videos(active_ch["channel_id"], channel_name=active_ch.get("channel_name", ""))
         if not channel_videos:
             st.markdown('<div class="empty-msg">채널의 최신 영상을 불러오지 못했습니다.</div>', unsafe_allow_html=True)
         else:
-            filtered_ch_videos = [t for t in channel_videos if t.get("is_music", True)] if is_mp3_mode else channel_videos
-            st.caption(f"'{active_ch.get('channel_name')}' 최신 업로드 ({len(filtered_ch_videos)}개)")
-            for idx, trk in enumerate(filtered_ch_videos):
+            st.caption(f"'{active_ch.get('channel_name')}' 업로드 영상 피드 ({len(channel_videos)}개)")
+            for idx, trk in enumerate(channel_videos):
                 render_track_row(idx, trk, key_prefix="ch_feed", user_playlists=user_playlists)
 
 with tab_pl:
