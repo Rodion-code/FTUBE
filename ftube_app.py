@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import Client, create_client
 
 st.set_page_config(page_title="FTUBE - Audio & Cinema", page_icon="🎵", layout="wide")
@@ -681,6 +682,105 @@ def fetch_channel_videos(channel_id: str, channel_name: str = "") -> List[Dict[s
 def build_youtube_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={video_id}"
 
+def render_player_engine(vid_id: str, is_mp3: bool, is_playing: bool) -> None:
+    if not vid_id or not is_playing:
+        return
+    
+    height = 0 if is_mp3 else 380
+    
+    html_code = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+            html, body {{ width: 100%; height: 100%; overflow: hidden; background: #000; }}
+            #yt_host {{ width: 100%; height: 100%; border-radius: 12px; }}
+            .hidden-player {{ position: absolute; left: -9999px; top: -9999px; width: 1px; height: 1px; opacity: 0; }}
+        </style>
+    </head>
+    <body>
+        <div id="yt_host" class="{'hidden-player' if is_mp3 else ''}"></div>
+        <script src="https://www.youtube.com/iframe_api"></script>
+        <script>
+            var vid = "{vid_id}";
+            var key = "ftube_play_pos_" + vid;
+            var saved = 0;
+            try {{
+                saved = parseFloat(localStorage.getItem(key) || sessionStorage.getItem(key) || "0");
+            }} catch(e) {{}}
+            
+            var player;
+            var timeTracker = null;
+
+            function onYouTubeIframeAPIReady() {{
+                player = new YT.Player('yt_host', {{
+                    videoId: vid,
+                    playerVars: {{
+                        'autoplay': 1,
+                        'start': Math.floor(saved),
+                        'enablejsapi': 1,
+                        'rel': 0,
+                        'modestbranding': 1,
+                        'playsinline': 1
+                    }},
+                    events: {{
+                        'onReady': onPlayerReady,
+                        'onStateChange': onPlayerStateChange
+                    }}
+                }});
+            }}
+
+            function onPlayerReady(event) {{
+                if (saved > 1) {{
+                    try {{
+                        event.target.seekTo(saved, true);
+                    }} catch(e) {{}}
+                }}
+                try {{
+                    event.target.playVideo();
+                }} catch(e) {{}}
+                
+                if (timeTracker) clearInterval(timeTracker);
+                timeTracker = setInterval(function() {{
+                    if (player && typeof player.getCurrentTime === 'function') {{
+                        try {{
+                            var cur = player.getCurrentTime();
+                            if (typeof cur === 'number' && cur > 0) {{
+                                localStorage.setItem(key, cur.toString());
+                                sessionStorage.setItem(key, cur.toString());
+                            }}
+                        }} catch(e) {{}}
+                    }}
+                }}, 400);
+            }}
+
+            function onPlayerStateChange(event) {{
+                if (event.data === 0) {{ // YT.PlayerState.ENDED
+                    try {{
+                        localStorage.removeItem(key);
+                        sessionStorage.removeItem(key);
+                    }} catch(e) {{}}
+                    
+                    try {{
+                        var doc = window.parent ? window.parent.document : document;
+                        var btns = Array.from(doc.querySelectorAll('button'));
+                        var nextBtn = btns.find(function(b) {{
+                            return b.textContent && b.textContent.includes('NEXT');
+                        }});
+                        if (nextBtn) {{
+                            nextBtn.click();
+                        }}
+                    }} catch(e) {{}}
+                }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    components.html(html_code, height=height)
+
 
 MUSIC_KEYWORDS = (
     "cover", "커버", "歌ってみた", "우타이테", "utaite",
@@ -1226,83 +1326,7 @@ with deck_col_player:
         </div>
         """, unsafe_allow_html=True)
 
-        if is_active and current_vid_id:
-            st.markdown(f'''
-            <iframe id="ftube_player_frame" class="hidden-audio-frame"
-                src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1"
-                allow="autoplay">
-            </iframe>
-            <script>
-            (function() {{
-                var vid = "{current_vid_id}";
-                if (!vid) return;
-                var key = "ftube_play_pos_" + vid;
-                var savedPos = parseFloat(sessionStorage.getItem(key) || "0");
-                window._ftubeNextTriggered = false;
-
-                function triggerNextTrack() {{
-                    if (window._ftubeNextTriggered) return;
-                    window._ftubeNextTriggered = true;
-                    setTimeout(function() {{
-                        var btns = Array.from(document.querySelectorAll('button'));
-                        var nextBtn = btns.find(function(b) {{
-                            return b.textContent && b.textContent.includes('NEXT');
-                        }});
-                        if (nextBtn) {{
-                            nextBtn.click();
-                        }}
-                    }}, 400);
-                }}
-
-                function syncFrame() {{
-                    var frame = document.getElementById("ftube_player_frame");
-                    if (!frame || !frame.contentWindow) return;
-                    try {{
-                        frame.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*");
-                        if (savedPos > 1) {{
-                            setTimeout(function() {{
-                                frame.contentWindow.postMessage(JSON.stringify({{
-                                    "event": "command",
-                                    "func": "seekTo",
-                                    "args": [savedPos, true]
-                                }}), "*");
-                            }}, 700);
-                        }}
-                    }} catch(e) {{}}
-                }}
-
-                if (!window._ftubeMsgAttached) {{
-                    window._ftubeMsgAttached = true;
-                    window.addEventListener("message", function(e) {{
-                        try {{
-                            var data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-                            if (!data) return;
-                            if (data.event === "infoDelivery" && data.info) {{
-                                var cTime = data.info.currentTime;
-                                if (typeof cTime === "number" && cTime > 0) {{
-                                    sessionStorage.setItem(key, cTime.toString());
-                                }}
-                                if (data.info.playerState === 0) {{
-                                    triggerNextTrack();
-                                }}
-                            }} else if (data.event === "onStateChange" && (data.info === 0 || data.data === 0)) {{
-                                triggerNextTrack();
-                            }}
-                        }} catch(err) {{}}
-                    }});
-                }}
-
-                syncFrame();
-                if (window._ftubeSyncInterval) clearInterval(window._ftubeSyncInterval);
-                window._ftubeSyncInterval = setInterval(function() {{
-                    var frame = document.getElementById("ftube_player_frame");
-                    if (frame && frame.contentWindow) {{
-                        try {{ frame.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*"); }} catch(e){{}}
-                    }}
-                }}, 1000);
-            }})();
-            </script>
-            ''', unsafe_allow_html=True)
+        render_player_engine(current_vid_id, is_mp3=True, is_playing=is_active)
 
         c_prev, c_play, c_next, c_shuf, c_rep, c_lyr, c_fav = st.columns([1.0, 1.25, 1.0, 1.0, 1.0, 1.0, 0.9], vertical_alignment="center")
         with c_prev:
@@ -1340,82 +1364,8 @@ with deck_col_player:
     else:
         st.markdown('<div class="video-cinema-deck">', unsafe_allow_html=True)
         if is_active and current_vid_id:
+            render_player_engine(current_vid_id, is_mp3=False, is_playing=is_active)
             st.markdown(f'''
-            <div class="video-wrapper">
-                <iframe id="ftube_player_frame" src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0"
-                    allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen>
-                </iframe>
-            </div>
-            <script>
-            (function() {{
-                var vid = "{current_vid_id}";
-                if (!vid) return;
-                var key = "ftube_play_pos_" + vid;
-                var savedPos = parseFloat(sessionStorage.getItem(key) || "0");
-                window._ftubeNextTriggered = false;
-
-                function triggerNextTrack() {{
-                    if (window._ftubeNextTriggered) return;
-                    window._ftubeNextTriggered = true;
-                    setTimeout(function() {{
-                        var btns = Array.from(document.querySelectorAll('button'));
-                        var nextBtn = btns.find(function(b) {{
-                            return b.textContent && b.textContent.includes('NEXT');
-                        }});
-                        if (nextBtn) {{
-                            nextBtn.click();
-                        }}
-                    }}, 400);
-                }}
-
-                function syncFrame() {{
-                    var frame = document.getElementById("ftube_player_frame");
-                    if (!frame || !frame.contentWindow) return;
-                    try {{
-                        frame.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*");
-                        if (savedPos > 1) {{
-                            setTimeout(function() {{
-                                frame.contentWindow.postMessage(JSON.stringify({{
-                                    "event": "command",
-                                    "func": "seekTo",
-                                    "args": [savedPos, true]
-                                }}), "*");
-                            }}, 700);
-                        }}
-                    }} catch(e) {{}}
-                }}
-
-                if (!window._ftubeMsgAttached) {{
-                    window._ftubeMsgAttached = true;
-                    window.addEventListener("message", function(e) {{
-                        try {{
-                            var data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-                            if (!data) return;
-                            if (data.event === "infoDelivery" && data.info) {{
-                                var cTime = data.info.currentTime;
-                                if (typeof cTime === "number" && cTime > 0) {{
-                                    sessionStorage.setItem(key, cTime.toString());
-                                }}
-                                if (data.info.playerState === 0) {{
-                                    triggerNextTrack();
-                                }}
-                            }} else if (data.event === "onStateChange" && (data.info === 0 || data.data === 0)) {{
-                                triggerNextTrack();
-                            }}
-                        }} catch(err) {{}}
-                    }});
-                }}
-
-                syncFrame();
-                if (window._ftubeSyncInterval) clearInterval(window._ftubeSyncInterval);
-                window._ftubeSyncInterval = setInterval(function() {{
-                    var frame = document.getElementById("ftube_player_frame");
-                    if (frame && frame.contentWindow) {{
-                        try {{ frame.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*"); }} catch(e){{}}
-                    }}
-                }}, 1000);
-            }})();
-            </script>
             <div class="video-meta-bar">
                 <div>
                     <div class="video-title-text">🎬 {current_title}</div>
@@ -1505,15 +1455,42 @@ with deck_col_queue:
                             st.session_state.queue_index = max(0, len(st.session_state.queue) - 1)
                         st.rerun()
 
-        col_q_clear, col_q_shuf = st.columns([1, 1])
+        col_q_save, col_q_shuf, col_q_clear = st.columns([1.2, 0.9, 0.9])
+        with col_q_save:
+            with st.popover("💾 플리 저장", use_container_width=True):
+                st.caption(f"현재 대기열 ({len(st.session_state.queue)}곡) 저장")
+                save_pl_name = st.text_input("새 플레이리스트 이름", placeholder="예: 오늘의 믹스", key="save_queue_pl_name")
+                if st.button("➕ 새 플리로 생성", use_container_width=True, key="btn_save_queue_pl_submit", type="primary"):
+                    if not save_pl_name.strip():
+                        st.warning("이름을 입력해주세요.")
+                    else:
+                        user_id = get_current_user_id()
+                        if user_id:
+                            formatted_items = []
+                            for q_item in st.session_state.queue:
+                                formatted_items.append({
+                                    "title": q_item.get("title") or q_item.get("raw_title", "Track"),
+                                    "artist": q_item.get("artist", "Unknown Artist"),
+                                    "url": q_item.get("url", ""),
+                                    "duration": q_item.get("duration", ""),
+                                    "channel": q_item.get("channel", ""),
+                                })
+                            supabase.table("playlists").insert({
+                                "user_id": user_id,
+                                "name": save_pl_name.strip(),
+                                "items": json.dumps(formatted_items, ensure_ascii=False),
+                            }).execute()
+                            get_playlists(force_refresh=True)
+                            st.toast(f"'{save_pl_name.strip()}' 플레이리스트로 저장되었습니다!")
+                            st.rerun()
+        with col_q_shuf:
+            if st.button("🔀 섞기", use_container_width=True, key="shuf_deck_queue_btn"):
+                random.shuffle(st.session_state.queue)
+                st.rerun()
         with col_q_clear:
-            if st.button("🗑 대기열 비우기", use_container_width=True, key="clear_deck_queue_btn"):
+            if st.button("🗑 비우기", use_container_width=True, key="clear_deck_queue_btn"):
                 st.session_state.queue = []
                 st.session_state.queue_index = 0
-                st.rerun()
-        with col_q_shuf:
-            if st.button("🔀 대기열 섞기", use_container_width=True, key="shuf_deck_queue_btn"):
-                random.shuffle(st.session_state.queue)
                 st.rerun()
     else:
         st.markdown("""
