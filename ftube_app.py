@@ -1334,73 +1334,89 @@ with deck_col_player:
         if is_active and current_vid_id:
             st.markdown(f'''
             <iframe id="ftube_audio_iframe" class="hidden-audio-frame"
-                src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0"
+                src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0&origin=https://ftube.streamlit.app"
                 allow="autoplay; encrypted-media">
             </iframe>
             <script>
             (function() {{
                 var vid = "{current_vid_id}";
                 if (!vid) return;
-                var key = "ftube_play_pos_" + vid;
-                var savedPos = parseFloat(sessionStorage.getItem(key) || "0");
 
-                function sendSeek() {{
-                    var f = document.getElementById("ftube_audio_iframe");
-                    if (f && f.contentWindow) {{
-                        try {{
-                            f.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*");
-                            if (savedPos > 1) {{
-                                f.contentWindow.postMessage(JSON.stringify({{
-                                    "event": "command",
-                                    "func": "seekTo",
-                                    "args": [savedPos, true]
-                                }}), "*");
-                            }}
-                        }} catch(e) {{}}
+                function ftube_trigger_next() {{
+                    var attempt = 0;
+                    function tryClick() {{
+                        var doc = (window.parent && window.parent.document !== window.document)
+                                  ? window.parent.document : document;
+                        var btns = Array.from(doc.querySelectorAll('button'));
+                        var nBtn = btns.find(function(b) {{
+                            return b.textContent && b.textContent.trim().indexOf('NEXT') !== -1;
+                        }});
+                        if (nBtn) {{ nBtn.click(); return; }}
+                        if (++attempt < 8) setTimeout(tryClick, 400);
+                    }}
+                    tryClick();
+                }}
+
+                // Clear old player if vid changed
+                if (window._ftubeVid !== vid) {{
+                    window._ftubeVid = vid;
+                    window._ftubeYTReady = false;
+                    if (window._ftubePlayer) {{
+                        try {{ window._ftubePlayer.destroy(); }} catch(e) {{}}
+                        window._ftubePlayer = null;
                     }}
                 }}
 
-                if (savedPos > 1) {{
-                    setTimeout(sendSeek, 600);
-                    setTimeout(sendSeek, 1200);
-                }}
+                var savedPos = parseFloat(sessionStorage.getItem("ftube_play_pos_" + vid) || "0");
 
-                if (!window._ftubeAttached) {{
-                    window._ftubeAttached = true;
-                    window.addEventListener("message", function(e) {{
-                        try {{
-                            var data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-                            if (!data) return;
-                            if (data.event === "infoDelivery" && data.info) {{
-                                var cTime = data.info.currentTime;
-                                if (typeof cTime === "number" && cTime > 0) {{
-                                    sessionStorage.setItem("ftube_play_pos_" + vid, cTime.toString());
-                                }}
-                                if (data.info.playerState === 0) {{
+                function initPlayer() {{
+                    if (window._ftubeYTReady) return;
+                    var iframe = document.getElementById("ftube_audio_iframe");
+                    if (!iframe || !window.YT || !window.YT.Player) return;
+                    window._ftubeYTReady = true;
+                    window._ftubePlayer = new YT.Player(iframe, {{
+                        events: {{
+                            onReady: function(e) {{
+                                if (savedPos > 1) e.target.seekTo(savedPos, true);
+                                if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
+                                window._ftubeSaveLoop = setInterval(function() {{
+                                    try {{
+                                        var t = window._ftubePlayer.getCurrentTime();
+                                        if (t > 0) sessionStorage.setItem("ftube_play_pos_" + vid, t.toString());
+                                    }} catch(e) {{}}
+                                }}, 1000);
+                            }},
+                            onStateChange: function(e) {{
+                                if (e.data === 0) {{
                                     sessionStorage.removeItem("ftube_play_pos_" + vid);
-                                    var doc = window.parent ? window.parent.document : document;
-                                    var btns = Array.from(doc.querySelectorAll('button'));
-                                    var nBtn = btns.find(function(b) {{ return b.textContent && b.textContent.includes('NEXT'); }});
-                                    if (nBtn) nBtn.click();
+                                    if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
+                                    ftube_trigger_next();
                                 }}
-                            }} else if (data.event === "onStateChange" && (data.info === 0 || data.data === 0)) {{
-                                sessionStorage.removeItem("ftube_play_pos_" + vid);
-                                var doc = window.parent ? window.parent.document : document;
-                                var btns = Array.from(doc.querySelectorAll('button'));
-                                var nBtn = btns.find(function(b) {{ return b.textContent && b.textContent.includes('NEXT'); }});
-                                if (nBtn) nBtn.click();
                             }}
-                        }} catch(err) {{}}
+                        }}
                     }});
                 }}
 
-                if (window._ftubePing) clearInterval(window._ftubePing);
-                window._ftubePing = setInterval(function() {{
-                    var f = document.getElementById("ftube_audio_iframe");
-                    if (f && f.contentWindow) {{
-                        try {{ f.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*"); }} catch(e){{}}
-                    }}
-                }}, 800);
+                // Load YT API once
+                if (!window._ftubeAPILoaded) {{
+                    window._ftubeAPILoaded = true;
+                    var tag = document.createElement('script');
+                    tag.src = "https://www.youtube.com/iframe_api";
+                    document.head.appendChild(tag);
+                    var _prev = window.onYouTubeIframeAPIReady;
+                    window.onYouTubeIframeAPIReady = function() {{
+                        if (_prev) _prev();
+                        initPlayer();
+                    }};
+                }} else if (window.YT && window.YT.Player) {{
+                    setTimeout(initPlayer, 300);
+                }} else {{
+                    var _prev2 = window.onYouTubeIframeAPIReady;
+                    window.onYouTubeIframeAPIReady = function() {{
+                        if (_prev2) _prev2();
+                        initPlayer();
+                    }};
+                }}
             }})();
             </script>
             ''', unsafe_allow_html=True)
@@ -1478,7 +1494,7 @@ with deck_col_player:
             st.markdown(f'''
             <div class="video-wrapper">
                 <iframe id="ftube_video_iframe"
-                    src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0"
+                    src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0&origin=https://ftube.streamlit.app"
                     allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen>
                 </iframe>
             </div>
@@ -1486,66 +1502,80 @@ with deck_col_player:
             (function() {{
                 var vid = "{current_vid_id}";
                 if (!vid) return;
-                var key = "ftube_play_pos_" + vid;
-                var savedPos = parseFloat(sessionStorage.getItem(key) || "0");
 
-                function sendSeek() {{
-                    var f = document.getElementById("ftube_video_iframe");
-                    if (f && f.contentWindow) {{
-                        try {{
-                            f.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*");
-                            if (savedPos > 1) {{
-                                f.contentWindow.postMessage(JSON.stringify({{
-                                    "event": "command",
-                                    "func": "seekTo",
-                                    "args": [savedPos, true]
-                                }}), "*");
-                            }}
-                        }} catch(e) {{}}
+                function ftube_trigger_next() {{
+                    var attempt = 0;
+                    function tryClick() {{
+                        var doc = (window.parent && window.parent.document !== window.document)
+                                  ? window.parent.document : document;
+                        var btns = Array.from(doc.querySelectorAll('button'));
+                        var nBtn = btns.find(function(b) {{
+                            return b.textContent && b.textContent.trim().indexOf('NEXT') !== -1;
+                        }});
+                        if (nBtn) {{ nBtn.click(); return; }}
+                        if (++attempt < 8) setTimeout(tryClick, 400);
+                    }}
+                    tryClick();
+                }}
+
+                if (window._ftubeVideoVid !== vid) {{
+                    window._ftubeVideoVid = vid;
+                    window._ftubeVideoReady = false;
+                    if (window._ftubeVideoPlayer) {{
+                        try {{ window._ftubeVideoPlayer.destroy(); }} catch(e) {{}}
+                        window._ftubeVideoPlayer = null;
                     }}
                 }}
 
-                if (savedPos > 1) {{
-                    setTimeout(sendSeek, 600);
-                    setTimeout(sendSeek, 1200);
-                }}
+                var savedPos = parseFloat(sessionStorage.getItem("ftube_play_pos_" + vid) || "0");
 
-                if (!window._ftubeAttached) {{
-                    window._ftubeAttached = true;
-                    window.addEventListener("message", function(e) {{
-                        try {{
-                            var data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-                            if (!data) return;
-                            if (data.event === "infoDelivery" && data.info) {{
-                                var cTime = data.info.currentTime;
-                                if (typeof cTime === "number" && cTime > 0) {{
-                                    sessionStorage.setItem("ftube_play_pos_" + vid, cTime.toString());
-                                }}
-                                if (data.info.playerState === 0) {{
+                function initVideoPlayer() {{
+                    if (window._ftubeVideoReady) return;
+                    var iframe = document.getElementById("ftube_video_iframe");
+                    if (!iframe || !window.YT || !window.YT.Player) return;
+                    window._ftubeVideoReady = true;
+                    window._ftubeVideoPlayer = new YT.Player(iframe, {{
+                        events: {{
+                            onReady: function(e) {{
+                                if (savedPos > 1) e.target.seekTo(savedPos, true);
+                                if (window._ftubeVideoSaveLoop) clearInterval(window._ftubeVideoSaveLoop);
+                                window._ftubeVideoSaveLoop = setInterval(function() {{
+                                    try {{
+                                        var t = window._ftubeVideoPlayer.getCurrentTime();
+                                        if (t > 0) sessionStorage.setItem("ftube_play_pos_" + vid, t.toString());
+                                    }} catch(e) {{}}
+                                }}, 1000);
+                            }},
+                            onStateChange: function(e) {{
+                                if (e.data === 0) {{
                                     sessionStorage.removeItem("ftube_play_pos_" + vid);
-                                    var doc = window.parent ? window.parent.document : document;
-                                    var btns = Array.from(doc.querySelectorAll('button'));
-                                    var nBtn = btns.find(function(b) {{ return b.textContent && b.textContent.includes('NEXT'); }});
-                                    if (nBtn) nBtn.click();
+                                    if (window._ftubeVideoSaveLoop) clearInterval(window._ftubeVideoSaveLoop);
+                                    ftube_trigger_next();
                                 }}
-                            }} else if (data.event === "onStateChange" && (data.info === 0 || data.data === 0)) {{
-                                sessionStorage.removeItem("ftube_play_pos_" + vid);
-                                var doc = window.parent ? window.parent.document : document;
-                                var btns = Array.from(doc.querySelectorAll('button'));
-                                var nBtn = btns.find(function(b) {{ return b.textContent && b.textContent.includes('NEXT'); }});
-                                if (nBtn) nBtn.click();
                             }}
-                        }} catch(err) {{}}
+                        }}
                     }});
                 }}
 
-                if (window._ftubePing) clearInterval(window._ftubePing);
-                window._ftubePing = setInterval(function() {{
-                    var f = document.getElementById("ftube_video_iframe");
-                    if (f && f.contentWindow) {{
-                        try {{ f.contentWindow.postMessage(JSON.stringify({{"event": "listening"}}), "*"); }} catch(e){{}}
-                    }}
-                }}, 800);
+                if (!window._ftubeAPILoaded) {{
+                    window._ftubeAPILoaded = true;
+                    var tag = document.createElement('script');
+                    tag.src = "https://www.youtube.com/iframe_api";
+                    document.head.appendChild(tag);
+                    var _prev = window.onYouTubeIframeAPIReady;
+                    window.onYouTubeIframeAPIReady = function() {{
+                        if (_prev) _prev();
+                        initVideoPlayer();
+                    }};
+                }} else if (window.YT && window.YT.Player) {{
+                    setTimeout(initVideoPlayer, 300);
+                }} else {{
+                    var _prev2 = window.onYouTubeIframeAPIReady;
+                    window.onYouTubeIframeAPIReady = function() {{
+                        if (_prev2) _prev2();
+                        initVideoPlayer();
+                    }};
+                }}
             }})();
             </script>
             <div class="video-meta-bar">
