@@ -319,16 +319,28 @@ html, body, [data-testid="stAppViewContainer"], .stApp {{
 .btn-primary button:hover {{ background: linear-gradient(135deg, #1d4ed8, #2563eb) !important; box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important; }}
 .btn-mode-toggle button {{ background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(168, 85, 247, 0.25)) !important; border-color: rgba(96, 165, 250, 0.4) !important; color: #67e8f9 !important; }}
 .btn-fav button {{ color: #fbbf24 !important; border-color: rgba(251, 191, 36, 0.4) !important; }}
-.auth-card {{
-    max-width: 400px; margin: 40px auto;
-    background: rgba(22, 30, 48, 0.85); backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 18px; padding: 32px;
-    box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+
+div[data-testid="stForm"] {{
+    background: rgba(22, 30, 48, 0.85) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    border-radius: 16px !important;
+    padding: 20px 22px !important;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1) !important;
 }}
-.auth-title {{
-    font-size: 1.25rem; font-weight: 700; color: #f8fafc; margin-bottom: 22px; text-align: center;
-    background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+div[data-testid="stForm"] button {{
+    background: linear-gradient(135deg, #2563eb, #3b82f6) !important;
+    border-color: #60a5fa !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35) !important;
 }}
+div[data-testid="stForm"] button:hover {{
+    background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5) !important;
+}}
+
 .empty-msg {{ text-align: center; padding: 48px 0; color: #64748b; font-size: 0.88rem; font-family: 'Share Tech Mono', monospace; line-height: 1.8; }}
 .section-title {{ font-family: 'Share Tech Mono', monospace; font-size: 0.74rem; letter-spacing: 0.15em; color: #60a5fa; text-transform: uppercase; margin-bottom: 12px; }}
 </style>
@@ -770,51 +782,65 @@ if not st.session_state.user:
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="auth-card">', unsafe_allow_html=True)
-    if st.session_state.auth_mode == "login":
-        st.markdown('<div class="auth-title">✨ 플레이어 로그인</div>', unsafe_allow_html=True)
-        with st.form("login_form"):
-            username = st.text_input("아이디", placeholder="아이디 입력")
-            password = st.text_input("비밀번호", placeholder="비밀번호 입력", type="password")
-            if st.form_submit_button("로그인", use_container_width=True):
-                if not username or not password:
-                    st.warning("아이디와 비밀번호를 입력해주세요.")
-                else:
-                    res = supabase.table("users").select("*").eq("username", username).eq("password", hash_password(password)).execute()
-                    if res.data:
-                        st.session_state.user = {"id": res.data[0]["id"], "username": res.data[0]["username"]}
-                        st.rerun()
+    col_l, col_auth, col_r = st.columns([1, 1.35, 1])
+    with col_auth:
+        if st.session_state.auth_mode == "login":
+            st.markdown("""
+            <div style="text-align: center; margin-top: 8px; margin-bottom: 16px;">
+                <div style="font-size: 1.3rem; font-weight: 800; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 4px;">✨ 플레이어 로그인</div>
+                <div style="font-family: 'Share Tech Mono', monospace; font-size: 0.76rem; color: #94a3b8; letter-spacing: 0.05em;">FTUBE 미디어 엔진에 오신 것을 환영합니다</div>
+            </div>
+            """, unsafe_allow_html=True)
+            with st.form("login_form"):
+                username = st.text_input("아이디", placeholder="아이디 입력")
+                password = st.text_input("비밀번호", placeholder="비밀번호 입력", type="password")
+                st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+                login_btn = st.form_submit_button("로그인", use_container_width=True)
+                if login_btn:
+                    if not username or not password:
+                        st.warning("아이디와 비밀번호를 입력해주세요.")
                     else:
-                        st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
-        st.write("")
-        if st.button("계정 생성 (회원가입)", use_container_width=True):
-            st.session_state.auth_mode = "register"
-            st.rerun()
-    else:
-        st.markdown('<div class="auth-title">✨ 새 계정 등록</div>', unsafe_allow_html=True)
-        with st.form("reg_form"):
-            username = st.text_input("아이디", placeholder="사용할 아이디")
-            password = st.text_input("비밀번호", placeholder="비밀번호", type="password")
-            password_confirm = st.text_input("비밀번호 확인", placeholder="비밀번호 재입력", type="password")
-            if st.form_submit_button("가입하기", use_container_width=True):
-                if not username or not password:
-                    st.warning("모든 정보를 입력해주세요.")
-                elif password != password_confirm:
-                    st.error("비밀번호가 일치하지 않습니다.")
-                else:
-                    existing_user = supabase.table("users").select("id").eq("username", username).execute()
-                    if existing_user.data:
-                        st.error("이미 존재하는 아이디입니다.")
+                        res = supabase.table("users").select("*").eq("username", username).eq("password", hash_password(password)).execute()
+                        if res.data:
+                            st.session_state.user = {"id": res.data[0]["id"], "username": res.data[0]["username"]}
+                            st.rerun()
+                        else:
+                            st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
+            st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+            if st.button("계정 생성 (회원가입)", use_container_width=True):
+                st.session_state.auth_mode = "register"
+                st.rerun()
+        else:
+            st.markdown("""
+            <div style="text-align: center; margin-top: 8px; margin-bottom: 16px;">
+                <div style="font-size: 1.3rem; font-weight: 800; background: linear-gradient(135deg, #38bdf8, #818cf8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 4px;">✨ 새 계정 등록</div>
+                <div style="font-family: 'Share Tech Mono', monospace; font-size: 0.76rem; color: #94a3b8; letter-spacing: 0.05em;">플레이리스트와 즐겨찾기를 저장하세요</div>
+            </div>
+            """, unsafe_allow_html=True)
+            with st.form("reg_form"):
+                username = st.text_input("아이디", placeholder="사용할 아이디")
+                password = st.text_input("비밀번호", placeholder="비밀번호", type="password")
+                password_confirm = st.text_input("비밀번호 확인", placeholder="비밀번호 재입력", type="password")
+                st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+                reg_btn = st.form_submit_button("가입하기", use_container_width=True)
+                if reg_btn:
+                    if not username or not password:
+                        st.warning("모든 정보를 입력해주세요.")
+                    elif password != password_confirm:
+                        st.error("비밀번호가 일치하지 않습니다.")
                     else:
-                        supabase.table("users").insert({"username": username, "password": hash_password(password)}).execute()
-                        st.success("가입이 완료되었습니다.")
-                        st.session_state.auth_mode = "login"
-                        st.rerun()
-        st.write("")
-        if st.button("로그인 화면으로", use_container_width=True):
-            st.session_state.auth_mode = "login"
-            st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+                        existing_user = supabase.table("users").select("id").eq("username", username).execute()
+                        if existing_user.data:
+                            st.error("이미 존재하는 아이디입니다.")
+                        else:
+                            supabase.table("users").insert({"username": username, "password": hash_password(password)}).execute()
+                            st.success("가입이 완료되었습니다.")
+                            st.session_state.auth_mode = "login"
+                            st.rerun()
+            st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+            if st.button("로그인 화면으로", use_container_width=True):
+                st.session_state.auth_mode = "login"
+                st.rerun()
     st.stop()
 
 
