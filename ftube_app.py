@@ -949,6 +949,11 @@ STOPWORDS = {
     "the", "a", "an", "in", "of", "to", "is", "on", "at", "by", "for"
 }
 
+def filter_music_only(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """is_music=True인 트랙만 반환. 없으면 원본 그대로."""
+    music_only = [r for r in results if r.get("is_music", False)]
+    return music_only if music_only else results
+
 def get_recommendations(force_refresh: bool = False) -> Tuple[List[Dict[str, Any]], str]:
     if not force_refresh and st.session_state.get("cached_recommendations"):
         return st.session_state.cached_recommendations, st.session_state.get("cached_rec_keyword", "음악")
@@ -956,20 +961,21 @@ def get_recommendations(force_refresh: bool = False) -> Tuple[List[Dict[str, Any
     user_keywords = get_keywords()
     if user_keywords:
         top_keyword = " ".join([k["keyword"] for k in user_keywords[:3]])
-        results = search_youtube_raw(top_keyword, max_items=12)
+        # 쿼리에 음악 관련 단어 추가하여 검색 자체를 좁힘
+        results = filter_music_only(search_youtube_raw(f"{top_keyword} 노래 MV", max_items=20))
         if results:
-            st.session_state.cached_recommendations = results
+            st.session_state.cached_recommendations = results[:12]
             st.session_state.cached_rec_keyword = top_keyword
-            return results, top_keyword
+            return results[:12], top_keyword
             
     history = get_history(30)
     favorites = get_favorites()
     all_titles = [h["title"] for h in history] + [f["title"] for f in favorites]
     if not all_titles:
-        results = search_youtube_raw("인기 노래 플레이리스트", max_items=12)
-        st.session_state.cached_recommendations = results
+        results = filter_music_only(search_youtube_raw("인기 노래 플레이리스트", max_items=20))
+        st.session_state.cached_recommendations = results[:12]
         st.session_state.cached_rec_keyword = "인기 음악 추천"
-        return results, "인기 음악 추천"
+        return results[:12], "인기 음악 추천"
         
     words = [
         word for title in all_titles
@@ -978,10 +984,11 @@ def get_recommendations(force_refresh: bool = False) -> Tuple[List[Dict[str, Any
     ]
     top_words = [word for word, _ in Counter(words).most_common(2)]
     keyword = " ".join(top_words) if top_words else "음악"
-    results = search_youtube_raw(f"{keyword} 노래", max_items=12)
-    st.session_state.cached_recommendations = results
+    # 검색 쿼리에 "노래 MV" 추가 + is_music 필터 이중 적용
+    results = filter_music_only(search_youtube_raw(f"{keyword} 노래 MV", max_items=20))
+    st.session_state.cached_recommendations = results[:12]
     st.session_state.cached_rec_keyword = keyword
-    return results, keyword
+    return results[:12], keyword
 
 
 def play_track(track: Dict[str, Any], queue_list: Optional[List[Dict[str, Any]]] = None, pos: Optional[int] = None) -> None:
