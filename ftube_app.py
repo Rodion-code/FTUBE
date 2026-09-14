@@ -961,7 +961,6 @@ def get_recommendations(force_refresh: bool = False) -> Tuple[List[Dict[str, Any
     user_keywords = get_keywords()
     if user_keywords:
         top_keyword = " ".join([k["keyword"] for k in user_keywords[:3]])
-        # 쿼리에 음악 관련 단어 추가하여 검색 자체를 좁힘
         results = filter_music_only(search_youtube_raw(f"{top_keyword} 노래 MV", max_items=20))
         if results:
             st.session_state.cached_recommendations = results[:12]
@@ -984,7 +983,6 @@ def get_recommendations(force_refresh: bool = False) -> Tuple[List[Dict[str, Any
     ]
     top_words = [word for word, _ in Counter(words).most_common(2)]
     keyword = " ".join(top_words) if top_words else "음악"
-    # 검색 쿼리에 "노래 MV" 추가 + is_music 필터 이중 적용
     results = filter_music_only(search_youtube_raw(f"{keyword} 노래 MV", max_items=20))
     st.session_state.cached_recommendations = results[:12]
     st.session_state.cached_rec_keyword = keyword
@@ -1349,29 +1347,36 @@ with deck_col_player:
                 var vid = "{current_vid_id}";
                 if (!vid) return;
 
+                // NEXT 버튼 클릭 트리거 — shadow DOM까지 탐색
                 function ftube_trigger_next() {{
                     var attempt = 0;
                     function tryClick() {{
-                        var doc = (window.parent && window.parent.document !== window.document)
-                                  ? window.parent.document : document;
-                        var btns = Array.from(doc.querySelectorAll('button'));
-                        var nBtn = btns.find(function(b) {{
-                            return b.textContent && b.textContent.trim().indexOf('NEXT') !== -1;
-                        }});
-                        if (nBtn) {{ nBtn.click(); return; }}
-                        if (++attempt < 8) setTimeout(tryClick, 400);
+                        var docs = [document];
+                        try {{ if (window.parent && window.parent.document !== document) docs.push(window.parent.document); }} catch(e) {{}}
+                        for (var di = 0; di < docs.length; di++) {{
+                            var btns = Array.from(docs[di].querySelectorAll('button'));
+                            var nBtn = btns.find(function(b) {{
+                                var t = b.textContent || b.innerText || "";
+                                return t.trim().indexOf('NEXT') !== -1;
+                            }});
+                            if (nBtn) {{ nBtn.click(); return; }}
+                        }}
+                        if (++attempt < 15) setTimeout(tryClick, 500);
                     }}
                     tryClick();
                 }}
 
-                // Clear old player if vid changed
+                // 트랙이 바뀌었으면 이전 플레이어 정리
                 if (window._ftubeVid !== vid) {{
                     window._ftubeVid = vid;
                     window._ftubeYTReady = false;
+                    window._ftubeFallbackStarted = false;
                     if (window._ftubePlayer) {{
                         try {{ window._ftubePlayer.destroy(); }} catch(e) {{}}
                         window._ftubePlayer = null;
                     }}
+                    if (window._ftubeSaveLoop) {{ clearInterval(window._ftubeSaveLoop); window._ftubeSaveLoop = null; }}
+                    if (window._ftubeFallbackTimer) {{ clearTimeout(window._ftubeFallbackTimer); window._ftubeFallbackTimer = null; }}
                 }}
 
                 var savedPos = parseFloat(sessionStorage.getItem("ftube_play_pos_" + vid) || "0");
@@ -1381,22 +1386,49 @@ with deck_col_player:
                     var iframe = document.getElementById("ftube_audio_iframe");
                     if (!iframe || !window.YT || !window.YT.Player) return;
                     window._ftubeYTReady = true;
+
                     window._ftubePlayer = new YT.Player(iframe, {{
                         events: {{
                             onReady: function(e) {{
                                 if (savedPos > 1) e.target.seekTo(savedPos, true);
+                                // 재생 시간 저장 루프
                                 if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
                                 window._ftubeSaveLoop = setInterval(function() {{
                                     try {{
                                         var t = window._ftubePlayer.getCurrentTime();
+                                        var dur = window._ftubePlayer.getDuration();
                                         if (t > 0) sessionStorage.setItem("ftube_play_pos_" + vid, t.toString());
+                                        // fallback: 영상 길이를 알면 종료 2초 전부터 폴링
+                                        if (dur > 0 && !window._ftubeFallbackStarted) {{
+                                            window._ftubeFallbackStarted = true;
+                                            var remaining = (dur - t - 2) * 1000;
+                                            if (remaining < 0) remaining = 0;
+                                            window._ftubeFallbackTimer = setTimeout(function() {{
+                                                // onStateChange 가 못 잡았을 때 직접 폴링
+                                                var poll = setInterval(function() {{
+                                                    try {{
+                                                        var state = window._ftubePlayer.getPlayerState();
+                                                        var cur = window._ftubePlayer.getCurrentTime();
+                                                        var d = window._ftubePlayer.getDuration();
+                                                        if (state === 0 || (d > 0 && cur >= d - 0.5)) {{
+                                                            clearInterval(poll);
+                                                            sessionStorage.removeItem("ftube_play_pos_" + vid);
+                                                            if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
+                                                            ftube_trigger_next();
+                                                        }}
+                                                    }} catch(e) {{ clearInterval(poll); }}
+                                                }}, 500);
+                                            }}, remaining);
+                                        }}
                                     }} catch(e) {{}}
                                 }}, 1000);
                             }},
                             onStateChange: function(e) {{
+                                // YT.PlayerState.ENDED = 0
                                 if (e.data === 0) {{
                                     sessionStorage.removeItem("ftube_play_pos_" + vid);
                                     if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
+                                    if (window._ftubeFallbackTimer) clearTimeout(window._ftubeFallbackTimer);
                                     ftube_trigger_next();
                                 }}
                             }}
@@ -1404,7 +1436,7 @@ with deck_col_player:
                     }});
                 }}
 
-                // Load YT API once
+                // YT IFrame API 로드 (한 번만)
                 if (!window._ftubeAPILoaded) {{
                     window._ftubeAPILoaded = true;
                     var tag = document.createElement('script');
@@ -1416,7 +1448,7 @@ with deck_col_player:
                         initPlayer();
                     }};
                 }} else if (window.YT && window.YT.Player) {{
-                    setTimeout(initPlayer, 300);
+                    setTimeout(initPlayer, 200);
                 }} else {{
                     var _prev2 = window.onYouTubeIframeAPIReady;
                     window.onYouTubeIframeAPIReady = function() {{
@@ -1513,14 +1545,17 @@ with deck_col_player:
                 function ftube_trigger_next() {{
                     var attempt = 0;
                     function tryClick() {{
-                        var doc = (window.parent && window.parent.document !== window.document)
-                                  ? window.parent.document : document;
-                        var btns = Array.from(doc.querySelectorAll('button'));
-                        var nBtn = btns.find(function(b) {{
-                            return b.textContent && b.textContent.trim().indexOf('NEXT') !== -1;
-                        }});
-                        if (nBtn) {{ nBtn.click(); return; }}
-                        if (++attempt < 8) setTimeout(tryClick, 400);
+                        var docs = [document];
+                        try {{ if (window.parent && window.parent.document !== document) docs.push(window.parent.document); }} catch(e) {{}}
+                        for (var di = 0; di < docs.length; di++) {{
+                            var btns = Array.from(docs[di].querySelectorAll('button'));
+                            var nBtn = btns.find(function(b) {{
+                                var t = b.textContent || b.innerText || "";
+                                return t.trim().indexOf('NEXT') !== -1;
+                            }});
+                            if (nBtn) {{ nBtn.click(); return; }}
+                        }}
+                        if (++attempt < 15) setTimeout(tryClick, 500);
                     }}
                     tryClick();
                 }}
@@ -1528,10 +1563,13 @@ with deck_col_player:
                 if (window._ftubeVideoVid !== vid) {{
                     window._ftubeVideoVid = vid;
                     window._ftubeVideoReady = false;
+                    window._ftubeVideoFallbackStarted = false;
                     if (window._ftubeVideoPlayer) {{
                         try {{ window._ftubeVideoPlayer.destroy(); }} catch(e) {{}}
                         window._ftubeVideoPlayer = null;
                     }}
+                    if (window._ftubeVideoSaveLoop) {{ clearInterval(window._ftubeVideoSaveLoop); window._ftubeVideoSaveLoop = null; }}
+                    if (window._ftubeVideoFallbackTimer) {{ clearTimeout(window._ftubeVideoFallbackTimer); window._ftubeVideoFallbackTimer = null; }}
                 }}
 
                 var savedPos = parseFloat(sessionStorage.getItem("ftube_play_pos_" + vid) || "0");
@@ -1549,7 +1587,28 @@ with deck_col_player:
                                 window._ftubeVideoSaveLoop = setInterval(function() {{
                                     try {{
                                         var t = window._ftubeVideoPlayer.getCurrentTime();
+                                        var dur = window._ftubeVideoPlayer.getDuration();
                                         if (t > 0) sessionStorage.setItem("ftube_play_pos_" + vid, t.toString());
+                                        if (dur > 0 && !window._ftubeVideoFallbackStarted) {{
+                                            window._ftubeVideoFallbackStarted = true;
+                                            var remaining = (dur - t - 2) * 1000;
+                                            if (remaining < 0) remaining = 0;
+                                            window._ftubeVideoFallbackTimer = setTimeout(function() {{
+                                                var poll = setInterval(function() {{
+                                                    try {{
+                                                        var state = window._ftubeVideoPlayer.getPlayerState();
+                                                        var cur = window._ftubeVideoPlayer.getCurrentTime();
+                                                        var d = window._ftubeVideoPlayer.getDuration();
+                                                        if (state === 0 || (d > 0 && cur >= d - 0.5)) {{
+                                                            clearInterval(poll);
+                                                            sessionStorage.removeItem("ftube_play_pos_" + vid);
+                                                            if (window._ftubeVideoSaveLoop) clearInterval(window._ftubeVideoSaveLoop);
+                                                            ftube_trigger_next();
+                                                        }}
+                                                    }} catch(e) {{ clearInterval(poll); }}
+                                                }}, 500);
+                                            }}, remaining);
+                                        }}
                                     }} catch(e) {{}}
                                 }}, 1000);
                             }},
@@ -1557,6 +1616,7 @@ with deck_col_player:
                                 if (e.data === 0) {{
                                     sessionStorage.removeItem("ftube_play_pos_" + vid);
                                     if (window._ftubeVideoSaveLoop) clearInterval(window._ftubeVideoSaveLoop);
+                                    if (window._ftubeVideoFallbackTimer) clearTimeout(window._ftubeVideoFallbackTimer);
                                     ftube_trigger_next();
                                 }}
                             }}
@@ -1575,7 +1635,7 @@ with deck_col_player:
                         initVideoPlayer();
                     }};
                 }} else if (window.YT && window.YT.Player) {{
-                    setTimeout(initVideoPlayer, 300);
+                    setTimeout(initVideoPlayer, 200);
                 }} else {{
                     var _prev2 = window.onYouTubeIframeAPIReady;
                     window.onYouTubeIframeAPIReady = function() {{
