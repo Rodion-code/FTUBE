@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from streamlit import title
 import hashlib
 import io
 import json
@@ -1129,6 +1128,7 @@ def render_track_row(
     raw_title = track.get("raw_title", "")
     parsed_title = track.get("title", "")
     display_title = raw_title if raw_title else (parsed_title or "Unknown Track")
+    title = display_title
     artist = track.get("artist", "Unknown Artist")
     channel_info = f" · {track['channel']}" if track.get("channel") else ""
     duration = track.get("duration", "")
