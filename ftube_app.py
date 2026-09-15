@@ -1203,12 +1203,16 @@ if not st.session_state.user:
                     if not username or not password:
                         st.warning("아이디와 비밀번호를 입력해주세요.")
                     else:
-                        res = supabase.table("users").select("*").eq("username", username).eq("password", hash_password(password)).execute()
-                        if res.data:
-                            st.session_state.user = {"id": res.data[0]["id"], "username": res.data[0]["username"]}
-                            st.rerun()
-                        else:
-                            st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
+                        try:
+                            res = supabase.table("users").select("*").eq("username", username).eq("password", hash_password(password)).execute()
+                            if res.data:
+                                st.session_state.user = {"id": res.data[0]["id"], "username": res.data[0]["username"]}
+                                st.rerun()
+                            else:
+                                st.error("아이디 또는 비밀번호가 일치하지 않습니다.")
+                        except Exception as e:
+                            st.error(f"⚠️ Supabase 데이터베이스 연결 실패: {e}")
+                            st.info("💡 Supabase 대시보드에서 프로젝트가 Paused(일시정지) 상태인지, 또는 Secrets의 SUPABASE_KEY가 유효한지 확인해주세요.")
             st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
             if st.button("계정 생성 (회원가입)", use_container_width=True):
                 st.session_state.auth_mode = "register"
@@ -1232,14 +1236,18 @@ if not st.session_state.user:
                     elif password != password_confirm:
                         st.error("비밀번호가 일치하지 않습니다.")
                     else:
-                        existing_user = supabase.table("users").select("id").eq("username", username).execute()
-                        if existing_user.data:
-                            st.error("이미 존재하는 아이디입니다.")
-                        else:
-                            supabase.table("users").insert({"username": username, "password": hash_password(password)}).execute()
-                            st.success("가입이 완료되었습니다.")
-                            st.session_state.auth_mode = "login"
-                            st.rerun()
+                        try:
+                            existing_user = supabase.table("users").select("id").eq("username", username).execute()
+                            if existing_user.data:
+                                st.error("이미 존재하는 아이디입니다.")
+                            else:
+                                supabase.table("users").insert({"username": username, "password": hash_password(password)}).execute()
+                                st.success("가입이 완료되었습니다.")
+                                st.session_state.auth_mode = "login"
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"⚠️ 회원가입 처리 실패 (DB 오류): {e}")
+                            st.info("💡 Supabase 대시보드에서 프로젝트 상태와 users 테이블 설정을 확인해주세요.")
             st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
             if st.button("로그인 화면으로", use_container_width=True):
                 st.session_state.auth_mode = "login"
