@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from streamlit import title
 import hashlib
 import io
 import json
@@ -310,8 +311,12 @@ html, body, [data-testid="stAppViewContainer"], .stApp {{
     background: rgba(36, 48, 74, 0.85); border-color: rgba(96, 165, 250, 0.4);
     transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }}
-.track-left {{ display: flex; align-items: center; gap: 14px; overflow: hidden; flex: 1; }}
-.track-num {{ font-family: 'Share Tech Mono', monospace; font-size: 0.82rem; color: var(--lcd-acc); min-width: 28px; font-weight: 700; }}
+.track-left {{ display: flex; align-items: center; gap: 12px; overflow: hidden; flex: 1; }}
+.track-thumb {{
+    width: 68px; height: 42px; border-radius: 6px; object-fit: cover; flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}}
+.track-num {{ font-family: 'Share Tech Mono', monospace; font-size: 0.82rem; color: var(--lcd-acc); min-width: 24px; font-weight: 700; }}
 .track-info {{ overflow: hidden; flex: 1; }}
 .track-title-text {{ font-size: 0.92rem; font-weight: 600; color: #f1f5f9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 3px; }}
 .track-artist-text {{ font-size: 0.78rem; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
@@ -818,7 +823,7 @@ def search_youtube_raw(query: str, max_items: int = 25) -> List[Dict[str, Any]]:
     encoded_query = requests.utils.quote(query.strip())
     url = f"https://www.youtube.com/results?search_query={encoded_query}&hl=ko&gl=KR"
     try:
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(url, headers=headers, timeout=6)
         if response.status_code != 200:
             return []
         patterns = [
@@ -837,6 +842,7 @@ def search_youtube_raw(query: str, max_items: int = 25) -> List[Dict[str, Any]]:
                     continue
         if not raw_json:
             return []
+
         results: List[Dict[str, Any]] = []
         seen_ids = set()
 
@@ -845,31 +851,78 @@ def search_youtube_raw(query: str, max_items: int = 25) -> List[Dict[str, Any]]:
             if not video_id or len(video_id) != 11 or video_id in seen_ids:
                 return None
             seen_ids.add(video_id)
+
             title_runs = renderer.get("title", {}).get("runs", [])
             title = title_runs[0].get("text", "Untitled") if title_runs else renderer.get("title", {}).get("simpleText", "Untitled")
             owner_runs = renderer.get("ownerText", {}).get("runs", [])
             channel = owner_runs[0].get("text", "") if owner_runs else ""
             duration = renderer.get("lengthText", {}).get("simpleText", "")
+
+            # 썸네일 추출 (가장 해상도 높은 것 우선)
+            thumbs = renderer.get("thumbnail", {}).get("thumbnails", [])
+            thumb_url = thumbs[-1].get("url", "") if thumbs else f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+            if thumb_url.startswith("//"):
+                thumb_url = "https:" + thumb_url
+
             parsed = smart_parse_title(title)
             artist = parsed["artist"] if parsed["artist"] != "Audio Track" else (channel or "Unknown Artist")
             is_music = is_music_track(title, channel=channel, tags=parsed["tags"])
+
             return {
-                "id": video_id, "raw_title": title, "title": parsed["song"],
-                "artist": artist, "tags": parsed["tags"], "channel": channel,
-                "duration": duration, "url": build_youtube_url(video_id), "is_music": is_music,
+                "id": video_id,
+                "raw_title": title,
+                "title": parsed["song"] if parsed.get("song") else title,
+                "artist": artist,
+                "tags": parsed["tags"],
+                "channel": channel,
+                "duration": duration,
+                "thumbnail": thumb_url,
+                "url": build_youtube_url(video_id),
+                "is_music": is_music,
             }
 
-        stack = [raw_json]
-        while stack and len(results) < max_items:
-            curr = stack.pop()
-            if isinstance(curr, dict):
-                if "videoRenderer" in curr:
-                    video_info = parse_video_renderer(curr["videoRenderer"])
-                    if video_info:
-                        results.append(video_info)
-                stack.extend(curr.values())
-            elif isinstance(curr, list):
-                stack.extend(curr)
+        # 1. 유튜브 공식 검색 랭킹 순서대로 순회 (정규 계층 구조)
+        try:
+            sections = (
+                raw_json.get("contents", {})
+                .get("twoColumnSearchResultsRenderer", {})
+                .get("primaryContents", {})
+                .get("sectionListRenderer", {})
+                .get("contents", [])
+            )
+            for section in sections:
+                item_section = section.get("itemSectionRenderer", {})
+                for item in item_section.get("contents", []):
+                    if "videoRenderer" in item:
+                        v_info = parse_video_renderer(item["videoRenderer"])
+                        if v_info:
+                            results.append(v_info)
+                            if len(results) >= max_items:
+                                break
+                if len(results) >= max_items:
+                    break
+        except Exception:
+            pass
+
+        # 2. 계층 구조가 변경되었을 경우를 대비한 BFS(FIFO 큐) 기반 순서 보존 순회
+        if not results:
+            from collections import deque
+            queue = deque([raw_json])
+            while queue and len(results) < max_items:
+                curr = queue.popleft()
+                if isinstance(curr, dict):
+                    if "videoRenderer" in curr:
+                        v_info = parse_video_renderer(curr["videoRenderer"])
+                        if v_info:
+                            results.append(v_info)
+                    for v in curr.values():
+                        if isinstance(v, (dict, list)):
+                            queue.append(v)
+                elif isinstance(curr, list):
+                    for elem in curr:
+                        if isinstance(elem, (dict, list)):
+                            queue.append(elem)
+
         return results
     except Exception:
         return []
@@ -1073,24 +1126,35 @@ def render_track_row(
     on_delete: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> None:
     tags_html = "".join([f"<span class='track-tag-badge'>{t}</span>" for t in track.get("tags", [])[:2]])
-    title = track.get("title") or track.get("raw_title", "Unknown Track")
+    raw_title = track.get("raw_title", "")
+    parsed_title = track.get("title", "")
+    display_title = raw_title if raw_title else (parsed_title or "Unknown Track")
     artist = track.get("artist", "Unknown Artist")
     channel_info = f" · {track['channel']}" if track.get("channel") else ""
     duration = track.get("duration", "")
     is_music = track.get("is_music")
     if is_music is None:
-        is_music = is_music_track(track.get("raw_title") or track.get("title", ""), channel=track.get("channel", ""), tags=track.get("tags"))
+        is_music = is_music_track(raw_title or parsed_title, channel=track.get("channel", ""), tags=track.get("tags"))
     music_badge = (
         "<span class='track-tag-badge' style='color:#4ade80;border-color:rgba(74,222,128,0.3);'>🎵 MUSIC</span>"
         if is_music
         else "<span class='track-tag-badge' style='color:#c084fc;border-color:rgba(192,132,252,0.3);'>🎬 VIDEO</span>"
     )
+
+    thumb_url = track.get("thumbnail")
+    if not thumb_url:
+        vid_m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", track.get("url", ""))
+        if vid_m:
+            thumb_url = f"https://i.ytimg.com/vi/{vid_m.group(1)}/hqdefault.jpg"
+    thumb_html = f"<img src='{thumb_url}' class='track-thumb' loading='lazy' alt='thumb' />" if thumb_url else ""
+
     st.markdown(f"""
     <div class="track-row">
         <div class="track-left">
             <div class="track-num">{index+1:02d}</div>
+            {thumb_html}
             <div class="track-info">
-                <div class="track-title-text">{music_badge}{tags_html}{title}</div>
+                <div class="track-title-text">{music_badge}{tags_html}{display_title}</div>
                 <div class="track-artist-text">{artist}{channel_info}</div>
             </div>
         </div>
@@ -1352,15 +1416,49 @@ with deck_col_player:
         """, unsafe_allow_html=True)
 
         if is_active and current_vid_id:
+            # 대기열 비디오 ID 추출 (백그라운드 탭에서도 끊김 없이 연속 재생되도록 유튜브 내장 플레이리스트 파라미터 구성)
+            queue_vid_ids = []
+            if st.session_state.queue:
+                q_len = len(st.session_state.queue)
+                curr_idx = st.session_state.queue_index
+                for i in range(curr_idx + 1, min(curr_idx + 20, q_len)):
+                    m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", st.session_state.queue[i].get("url", ""))
+                    if m and m.group(1) != current_vid_id:
+                        queue_vid_ids.append(m.group(1))
+                if st.session_state.repeat_mode == "all" and curr_idx > 0:
+                    for i in range(0, min(curr_idx, 10)):
+                        m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", st.session_state.queue[i].get("url", ""))
+                        if m and m.group(1) != current_vid_id and m.group(1) not in queue_vid_ids:
+                            queue_vid_ids.append(m.group(1))
+
+            playlist_param = f"&playlist={','.join(queue_vid_ids)}" if queue_vid_ids else ""
+
             st.markdown(f'''
             <iframe id="ftube_audio_iframe" class="hidden-audio-frame"
-                src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0&origin=https://ftube.streamlit.app"
+                src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0{playlist_param}&origin=https://ftube.streamlit.app"
                 allow="autoplay; encrypted-media">
             </iframe>
             <script>
             (function() {{
                 var vid = "{current_vid_id}";
                 if (!vid) return;
+
+                // 백그라운드 탭 슬립 방지 (Web Audio Keep-Alive)
+                if (!window._ftubeAudioKeepAlive) {{
+                    window._ftubeAudioKeepAlive = true;
+                    try {{
+                        var AC = window.AudioContext || window.webkitAudioContext;
+                        if (AC) {{
+                            var ctx = new AC();
+                            var osc = ctx.createOscillator();
+                            var gain = ctx.createGain();
+                            gain.gain.value = 0.00001;
+                            osc.connect(gain);
+                            gain.connect(ctx.destination);
+                            osc.start(0);
+                        }}
+                    }} catch(e) {{}}
+                }}
 
                 function ftube_trigger_next() {{
                     var attempt = 0;
@@ -1370,12 +1468,12 @@ with deck_col_player:
                         for (var di = 0; di < docs.length; di++) {{
                             var btns = Array.from(docs[di].querySelectorAll('button'));
                             var nBtn = btns.find(function(b) {{
-                                var t = b.textContent || b.innerText || "";
-                                return t.trim().indexOf('NEXT') !== -1;
+                                var t = (b.textContent || b.innerText || "").trim();
+                                return t.indexOf('NEXT') !== -1 || (b.getAttribute('data-testid') && b.getAttribute('data-testid').indexOf('deck_next') !== -1);
                             }});
                             if (nBtn) {{ nBtn.click(); return; }}
                         }}
-                        if (++attempt < 15) setTimeout(tryClick, 500);
+                        if (++attempt < 20) setTimeout(tryClick, 400);
                     }}
                     tryClick();
                 }}
@@ -1435,12 +1533,36 @@ with deck_col_player:
                             }},
                             onStateChange: function(e) {{
                                 if (e.data === 0) {{
+                                    // 노래 종료 시
                                     sessionStorage.removeItem("ftube_play_pos_" + vid);
                                     if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
                                     if (window._ftubeFallbackTimer) clearTimeout(window._ftubeFallbackTimer);
                                     ftube_trigger_next();
+                                }} else if (e.data === 1) {{
+                                    // 유튜브 내부 플레이리스트로 다음 곡이 시작된 경우 동기화
+                                    try {{
+                                        var curData = e.target.getVideoData();
+                                        if (curData && curData.video_id && curData.video_id !== vid) {{
+                                            ftube_trigger_next();
+                                        }}
+                                    }} catch(err) {{}}
                                 }}
                             }}
+                        }}
+                    }});
+                }}
+
+                // 탭으로 다시 돌아왔을 때 재생 상태 동기화 리스너
+                if (!window._ftubeVisibilityHooked) {{
+                    window._ftubeVisibilityHooked = true;
+                    document.addEventListener("visibilitychange", function() {{
+                        if (!document.hidden && window._ftubePlayer) {{
+                            try {{
+                                var curData = window._ftubePlayer.getVideoData();
+                                if (curData && curData.video_id && curData.video_id !== window._ftubeVid) {{
+                                    ftube_trigger_next();
+                                }}
+                            }} catch(e) {{}}
                         }}
                     }});
                 }}
@@ -1548,10 +1670,27 @@ with deck_col_player:
     else:
         st.markdown('<div class="video-cinema-deck">', unsafe_allow_html=True)
         if is_active and current_vid_id:
+            # 대기열 비디오 ID 추출
+            queue_vid_ids = []
+            if st.session_state.queue:
+                q_len = len(st.session_state.queue)
+                curr_idx = st.session_state.queue_index
+                for i in range(curr_idx + 1, min(curr_idx + 20, q_len)):
+                    m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", st.session_state.queue[i].get("url", ""))
+                    if m and m.group(1) != current_vid_id:
+                        queue_vid_ids.append(m.group(1))
+                if st.session_state.repeat_mode == "all" and curr_idx > 0:
+                    for i in range(0, min(curr_idx, 10)):
+                        m = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", st.session_state.queue[i].get("url", ""))
+                        if m and m.group(1) != current_vid_id and m.group(1) not in queue_vid_ids:
+                            queue_vid_ids.append(m.group(1))
+
+            playlist_param = f"&playlist={','.join(queue_vid_ids)}" if queue_vid_ids else ""
+
             st.markdown(f'''
             <div class="video-wrapper">
                 <iframe id="ftube_video_iframe"
-                    src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0&origin=https://ftube.streamlit.app"
+                    src="https://www.youtube.com/embed/{current_vid_id}?autoplay=1&enablejsapi=1&rel=0{playlist_param}&origin=https://ftube.streamlit.app"
                     allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen>
                 </iframe>
             </div>
@@ -1568,12 +1707,12 @@ with deck_col_player:
                         for (var di = 0; di < docs.length; di++) {{
                             var btns = Array.from(docs[di].querySelectorAll('button'));
                             var nBtn = btns.find(function(b) {{
-                                var t = b.textContent || b.innerText || "";
-                                return t.trim().indexOf('NEXT') !== -1;
+                                var t = (b.textContent || b.innerText || "").trim();
+                                return t.indexOf('NEXT') !== -1 || (b.getAttribute('data-testid') && b.getAttribute('data-testid').indexOf('deck_next') !== -1);
                             }});
                             if (nBtn) {{ nBtn.click(); return; }}
                         }}
-                        if (++attempt < 15) setTimeout(tryClick, 500);
+                        if (++attempt < 20) setTimeout(tryClick, 400);
                     }}
                     tryClick();
                 }}
@@ -1614,13 +1753,13 @@ with deck_col_player:
                                             window._ftubeVideoFallbackTimer = setTimeout(function() {{
                                                 var poll = setInterval(function() {{
                                                     try {{
-                                                        var state = window._ftubePlayer.getPlayerState();
-                                                        var cur = window._ftubePlayer.getCurrentTime();
-                                                        var d = window._ftubePlayer.getDuration();
+                                                        var state = window._ftubeVideoPlayer.getPlayerState();
+                                                        var cur = window._ftubeVideoPlayer.getCurrentTime();
+                                                        var d = window._ftubeVideoPlayer.getDuration();
                                                         if (state === 0 || (d > 0 && cur >= d - 0.5)) {{
                                                             clearInterval(poll);
                                                             sessionStorage.removeItem("ftube_play_pos_" + vid);
-                                                            if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
+                                                            if (window._ftubeVideoSaveLoop) clearInterval(window._ftubeVideoSaveLoop);
                                                             ftube_trigger_next();
                                                         }}
                                                     }} catch(e) {{ clearInterval(poll); }}
@@ -1633,11 +1772,32 @@ with deck_col_player:
                             onStateChange: function(e) {{
                                 if (e.data === 0) {{
                                     sessionStorage.removeItem("ftube_play_pos_" + vid);
-                                    if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
-                                    if (window._ftubeFallbackTimer) clearTimeout(window._ftubeFallbackTimer);
+                                    if (window._ftubeVideoSaveLoop) clearInterval(window._ftubeVideoSaveLoop);
+                                    if (window._ftubeVideoFallbackTimer) clearTimeout(window._ftubeVideoFallbackTimer);
                                     ftube_trigger_next();
+                                }} else if (e.data === 1) {{
+                                    try {{
+                                        var curData = e.target.getVideoData();
+                                        if (curData && curData.video_id && curData.video_id !== vid) {{
+                                            ftube_trigger_next();
+                                        }}
+                                    }} catch(err) {{}}
                                 }}
                             }}
+                        }}
+                    }});
+                }}
+
+                if (!window._ftubeVideoVisibilityHooked) {{
+                    window._ftubeVideoVisibilityHooked = true;
+                    document.addEventListener("visibilitychange", function() {{
+                        if (!document.hidden && window._ftubeVideoPlayer) {{
+                            try {{
+                                var curData = window._ftubeVideoPlayer.getVideoData();
+                                if (curData && curData.video_id && curData.video_id !== window._ftubeVideoVid) {{
+                                    ftube_trigger_next();
+                                }}
+                            }} catch(e) {{}}
                         }}
                     }});
                 }}
