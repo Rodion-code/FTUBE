@@ -875,32 +875,30 @@ def search_youtube_raw(query: str, max_items: int = 25) -> List[Dict[str, Any]]:
         return []
 
 
+def safe_filename(name: str) -> str:
+    """윈도우 파일 시스템 금지 문자 및 다중 공백 정리"""
+    clean = re.sub(r'[\\/:*?"<>|]', "", name)
+    clean = re.sub(r"\s+", " ", clean)
+    return clean.strip() or "track"
+
+
 def download_mp3_from_youtube(youtube_url: str, title: str) -> Optional[bytes]:
-    """Download audio from YouTube and return MP3 bytes using yt-dlp with safe 403 bypass."""
+    """Download audio from YouTube and return MP3 bytes using yt-dlp with user cookies & ejs:github."""
     if not YTDLP_AVAILABLE:
         st.error("yt-dlp가 설치되지 않았습니다. requirements.txt에 yt-dlp를 추가해주세요.")
         return None
 
     tmpdir = tempfile.mkdtemp(prefix="ftube_dl_")
-    outtmpl = os.path.join(tmpdir, "track.%(ext)s")
+    clean_title = safe_filename(title)
+    outtmpl = os.path.join(tmpdir, f"{clean_title}.%(ext)s")
 
+    # 첨부해주신 옵션 기반 구성
     ydl_opts = {
+        "remote_components": ["ejs:github"],
         "format": "bestaudio/best",
         "outtmpl": outtmpl,
         "quiet": True,
-        "no_warnings": True,
-        "nocheckcertificate": True,
-        "retries": 5,
-        "fragment_retries": 5,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["ios", "mweb", "android"],
-            }
-        },
-        "http_headers": {
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
-            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-        },
+        "no_warnings": False,
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -910,22 +908,36 @@ def download_mp3_from_youtube(youtube_url: str, title: str) -> Optional[bytes]:
         ],
     }
 
-    # cookies.txt가 있으면 자동 연동
-    if os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0:
-        ydl_opts["cookiefile"] = "cookies.txt"
+    # cookies.txt 탐색 (로컬 파일 또는 Streamlit Secrets 지원)
+    cookie_paths = [
+        "cookies.txt",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt"),
+    ]
+    for cp in cookie_paths:
+        if os.path.exists(cp) and os.path.getsize(cp) > 0:
+            ydl_opts["cookiefile"] = cp
+            break
+
+    # Streamlit Cloud 배포용: secrets.toml에 YOUTUBE_COOKIES가 등록되어 있는 경우
+    if "cookiefile" not in ydl_opts and "YOUTUBE_COOKIES" in st.secrets:
+        secret_cookies = st.secrets["YOUTUBE_COOKIES"]
+        if secret_cookies and secret_cookies.strip():
+            temp_cookie_path = os.path.join(tmpdir, "secrets_cookies.txt")
+            with open(temp_cookie_path, "w", encoding="utf-8") as cf:
+                cf.write(secret_cookies.strip())
+            ydl_opts["cookiefile"] = temp_cookie_path
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([youtube_url])
 
-        mp3_path = os.path.join(tmpdir, "track.mp3")
-        if not os.path.exists(mp3_path):
-            for fname in os.listdir(tmpdir):
-                if fname.endswith(".mp3"):
-                    mp3_path = os.path.join(tmpdir, fname)
-                    break
+        mp3_path = None
+        for fname in os.listdir(tmpdir):
+            if fname.endswith(".mp3"):
+                mp3_path = os.path.join(tmpdir, fname)
+                break
 
-        if os.path.exists(mp3_path):
+        if mp3_path and os.path.exists(mp3_path):
             with open(mp3_path, "rb") as f:
                 mp3_bytes = f.read()
             try:

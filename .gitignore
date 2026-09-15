@@ -1,0 +1,16 @@
+# Python & IDE
+__pycache__/
+*.pyc
+.vs/
+.vscode/
+
+# Streamlit Local Secrets (Supabase 키 보호)
+.streamlit/
+
+# YouTube Cookies (구글 계정 개인정보 및 세션 보호)
+cookies.txt
+*.cookie
+
+# Temporary Downloads
+downloads/
+ftube_dl_*/
