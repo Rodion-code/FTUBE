@@ -889,12 +889,23 @@ def download_mp3_from_youtube(youtube_url: str, title: str) -> Optional[bytes]:
         "outtmpl": outtmpl,
         "quiet": True,
         "no_warnings": True,
-        "remote_components": ["ejs:github"],  # 403 Forbidden 우회
+        "nocheckcertificate": True,
+        "retries": 5,
+        "fragment_retries": 5,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["ios", "mweb", "android"],
+            }
+        },
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        },
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": "192",
+                "preferredquality": "320",
             }
         ],
     }
