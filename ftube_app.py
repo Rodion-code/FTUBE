@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+
 try:
     import yt_dlp
     YTDLP_AVAILABLE = True
@@ -57,6 +58,9 @@ DEFAULT_SESSION_STATES: Dict[str, Any] = {
     "cached_recommendations": None,
     "cached_rec_keyword": "",
     "local_channels": [],
+    "dl_cached_bytes": None,
+    "dl_cached_name": None,
+    "dl_cached_url": "",
 }
 
 def init_session_state() -> None:
@@ -563,7 +567,6 @@ def resolve_youtube_channel(channel_input: str) -> Optional[Dict[str, Any]]:
         return None
     raw = channel_input.strip()
 
-    # 1. Direct channel ID check (UC...)
     direct_match = re.search(r"(UC[A-Za-z0-9_-]{22})", raw)
     if direct_match:
         channel_id = direct_match.group(1)
@@ -584,7 +587,6 @@ def resolve_youtube_channel(channel_input: str) -> Optional[Dict[str, Any]]:
         "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
     }
 
-    # 2. Handle or URL parsing
     if raw.startswith("http") or raw.startswith("@"):
         handle_match = re.search(r"(@[A-Za-z0-9_.-]+)", raw)
         handle = handle_match.group(1) if handle_match else ("@" + raw.lstrip("@/ "))
@@ -604,7 +606,6 @@ def resolve_youtube_channel(channel_input: str) -> Optional[Dict[str, Any]]:
         except Exception:
             pass
 
-    # 3. Keyword / Name search for Channel
     try:
         encoded = requests.utils.quote(raw)
         search_url = f"https://www.youtube.com/results?search_query={encoded}&sp=EgIQAg%253D%253D&hl=ko&gl=KR"
@@ -638,7 +639,6 @@ def fetch_channel_videos(channel_id: str, channel_name: str = "") -> List[Dict[s
         return []
     videos = []
     
-    # 1. Try YouTube RSS feed
     rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
     try:
         res = requests.get(rss_url, timeout=5)
@@ -680,7 +680,6 @@ def fetch_channel_videos(channel_id: str, channel_name: str = "") -> List[Dict[s
     except Exception:
         pass
 
-    # 2. Fallback search if RSS had 0 videos
     if not videos and channel_name:
         fallback_results = search_youtube_raw(f"{channel_name}", max_items=20)
         for trk in fallback_results:
@@ -690,7 +689,6 @@ def fetch_channel_videos(channel_id: str, channel_name: str = "") -> List[Dict[s
 
 def build_youtube_url(video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={video_id}"
-
 
 STRONG_MUSIC_KEYWORDS = (
     "cover", "커버", "歌ってみた", "우타이테", "utaite",
@@ -730,10 +728,7 @@ def is_music_track(title: str, channel: str = "", tags: Optional[List[str]] = No
     t_lower = title.lower()
     c_lower = channel.lower()
     
-    # 1. Check strong music keywords in title
     has_strong_title = any(kw in t_lower for kw in STRONG_MUSIC_KEYWORDS)
-    
-    # 2. Check non-music keywords in title
     has_non_music = any(kw in t_lower for kw in NON_MUSIC_KEYWORDS)
     
     if has_strong_title:
@@ -741,13 +736,11 @@ def is_music_track(title: str, channel: str = "", tags: Optional[List[str]] = No
     if has_non_music:
         return False
         
-    # 3. Check tags
     if tags:
         music_tags = {"COVER", "ORIGINAL", "REMIX", "BGM", "ACOUSTIC", "LIVE"}
         if any(t in music_tags for t in tags):
             return True
             
-    # 4. Check typical music title patterns
     if any(sep in title for sep in (" - ", " – ", " — ", " / ", " | ")):
         if any(mkw in c_lower for mkw in ("records", "music", "audio", "vevo", "sound", "band", "orchestra", "topic", "엔터테인먼트", "ent")):
             return True
@@ -777,7 +770,6 @@ def smart_parse_title(raw_title: str) -> Dict[str, Any]:
         song_candidate = re.sub(noise_pattern, "", parts[1]).strip()
         return {"artist": artist_candidate or parts[0], "song": song_candidate or parts[1], "tags": tags}
     return {"artist": "Audio Track", "song": clean_text or raw_title, "tags": tags}
-
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_lyrics(song: str, artist: str) -> Optional[Dict[str, Any]]:
@@ -814,7 +806,6 @@ def parse_lrc_lines(synced_text: Optional[str]) -> List[Dict[str, Any]]:
         if text:
             lines.append({"sec": minutes * 60 + seconds, "text": text})
     return lines
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def search_youtube_raw(query: str, max_items: int = 25) -> List[Dict[str, Any]]:
@@ -884,26 +875,21 @@ def search_youtube_raw(query: str, max_items: int = 25) -> List[Dict[str, Any]]:
         return []
 
 
-
-
 def download_mp3_from_youtube(youtube_url: str, title: str) -> Optional[bytes]:
-    """Download audio from YouTube and return MP3 bytes using yt-dlp with android client."""
+    """Download audio from YouTube and return MP3 bytes using yt-dlp with safe 403 bypass."""
     if not YTDLP_AVAILABLE:
         st.error("yt-dlp가 설치되지 않았습니다. requirements.txt에 yt-dlp를 추가해주세요.")
         return None
-    safe_title = re.sub(r'[\\/:*?"<>|]', "", title).strip() or "audio"
+
     tmpdir = tempfile.mkdtemp(prefix="ftube_dl_")
-    outtmpl = os.path.join(tmpdir, "%(title)s.%(ext)s")
+    outtmpl = os.path.join(tmpdir, "track.%(ext)s")
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": outtmpl,
         "quiet": True,
         "no_warnings": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "web"],
-            }
-        },
+        "remote_components": ["ejs:github"],  # 403 Forbidden 우회
         "postprocessors": [
             {
                 "key": "FFmpegExtractAudio",
@@ -912,27 +898,32 @@ def download_mp3_from_youtube(youtube_url: str, title: str) -> Optional[bytes]:
             }
         ],
     }
+
+    # cookies.txt가 있으면 자동 연동
+    if os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0:
+        ydl_opts["cookiefile"] = "cookies.txt"
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(youtube_url, download=True)
-            dl_title = re.sub(r'[\\/:*?"<>|]', "", info.get("title", safe_title)).strip()
-            mp3_path = os.path.join(tmpdir, f"{dl_title}.mp3")
-            # yt-dlp sometimes names it differently, find the .mp3
-            if not os.path.exists(mp3_path):
-                for fname in os.listdir(tmpdir):
-                    if fname.endswith(".mp3"):
-                        mp3_path = os.path.join(tmpdir, fname)
-                        break
-            if os.path.exists(mp3_path):
-                with open(mp3_path, "rb") as f:
-                    mp3_bytes = f.read()
-                # Cleanup
-                try:
-                    import shutil
-                    shutil.rmtree(tmpdir, ignore_errors=True)
-                except Exception:
-                    pass
-                return mp3_bytes
+            ydl.download([youtube_url])
+
+        mp3_path = os.path.join(tmpdir, "track.mp3")
+        if not os.path.exists(mp3_path):
+            for fname in os.listdir(tmpdir):
+                if fname.endswith(".mp3"):
+                    mp3_path = os.path.join(tmpdir, fname)
+                    break
+
+        if os.path.exists(mp3_path):
+            with open(mp3_path, "rb") as f:
+                mp3_bytes = f.read()
+            try:
+                import shutil
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            except Exception:
+                pass
+            return mp3_bytes
+
     except Exception as e:
         try:
             import shutil
@@ -950,7 +941,6 @@ STOPWORDS = {
 }
 
 def filter_music_only(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """is_music=True인 트랙만 반환. 없으면 원본 그대로."""
     music_only = [r for r in results if r.get("is_music", False)]
     return music_only if music_only else results
 
@@ -987,7 +977,6 @@ def get_recommendations(force_refresh: bool = False) -> Tuple[List[Dict[str, Any
     st.session_state.cached_recommendations = results[:12]
     st.session_state.cached_rec_keyword = keyword
     return results[:12], keyword
-
 
 def play_track(track: Dict[str, Any], queue_list: Optional[List[Dict[str, Any]]] = None, pos: Optional[int] = None) -> None:
     track_url = track.get("url", "")
@@ -1051,7 +1040,6 @@ def play_prev() -> None:
         return
     prev_pos = max(0, st.session_state.queue_index - 1)
     play_track(queue[prev_pos], queue_list=queue, pos=prev_pos)
-
 
 def render_track_row(
     index: int, track: Dict[str, Any], key_prefix: str,
@@ -1141,11 +1129,9 @@ def render_track_row(
                 on_delete(track)
                 st.rerun()
 
-
 if not st.session_state.user:
     st.markdown("""
     <style>
-    /* Lock scrolling on authentication view */
     html, body, [data-testid="stAppViewContainer"], .stApp {
         overflow: hidden !important;
         height: 100vh !important;
@@ -1237,7 +1223,6 @@ if not st.session_state.user:
                 st.rerun()
     st.stop()
 
-
 is_mp3_mode = st.session_state.player_mode == "mp3"
 beacon_cls = "beacon-dot" if is_mp3_mode else "beacon-dot video-mode"
 mode_title_badge = "MP3 DAP" if is_mp3_mode else "CINEMA VIDEO"
@@ -1281,7 +1266,6 @@ with head_col_out:
     if st.button("로그아웃", use_container_width=True, key="header_logout_btn"):
         st.session_state.user = None
         st.rerun()
-
 
 current_title = st.session_state.title or "NO TRACK LOADED"
 current_artist = st.session_state.artist or "STANDBY MODE"
@@ -1347,7 +1331,6 @@ with deck_col_player:
                 var vid = "{current_vid_id}";
                 if (!vid) return;
 
-                // NEXT 버튼 클릭 트리거 — shadow DOM까지 탐색
                 function ftube_trigger_next() {{
                     var attempt = 0;
                     function tryClick() {{
@@ -1366,7 +1349,6 @@ with deck_col_player:
                     tryClick();
                 }}
 
-                // 트랙이 바뀌었으면 이전 플레이어 정리
                 if (window._ftubeVid !== vid) {{
                     window._ftubeVid = vid;
                     window._ftubeYTReady = false;
@@ -1391,20 +1373,17 @@ with deck_col_player:
                         events: {{
                             onReady: function(e) {{
                                 if (savedPos > 1) e.target.seekTo(savedPos, true);
-                                // 재생 시간 저장 루프
                                 if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
                                 window._ftubeSaveLoop = setInterval(function() {{
                                     try {{
                                         var t = window._ftubePlayer.getCurrentTime();
                                         var dur = window._ftubePlayer.getDuration();
                                         if (t > 0) sessionStorage.setItem("ftube_play_pos_" + vid, t.toString());
-                                        // fallback: 영상 길이를 알면 종료 2초 전부터 폴링
                                         if (dur > 0 && !window._ftubeFallbackStarted) {{
                                             window._ftubeFallbackStarted = true;
                                             var remaining = (dur - t - 2) * 1000;
                                             if (remaining < 0) remaining = 0;
                                             window._ftubeFallbackTimer = setTimeout(function() {{
-                                                // onStateChange 가 못 잡았을 때 직접 폴링
                                                 var poll = setInterval(function() {{
                                                     try {{
                                                         var state = window._ftubePlayer.getPlayerState();
@@ -1424,7 +1403,6 @@ with deck_col_player:
                                 }}, 1000);
                             }},
                             onStateChange: function(e) {{
-                                // YT.PlayerState.ENDED = 0
                                 if (e.data === 0) {{
                                     sessionStorage.removeItem("ftube_play_pos_" + vid);
                                     if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
@@ -1436,7 +1414,6 @@ with deck_col_player:
                     }});
                 }}
 
-                // YT IFrame API 로드 (한 번만)
                 if (!window._ftubeAPILoaded) {{
                     window._ftubeAPILoaded = true;
                     var tag = document.createElement('script');
@@ -1477,7 +1454,7 @@ with deck_col_player:
                 st.session_state.shuffle = not st.session_state.shuffle
                 st.rerun()
         with c_rep:
-            rep_labels = {"all": "🔁 ALL", "one": "🔂 ONE", "off": "➡ OFF"}
+            rep_labels = {"all": "🔁 ALL", "one": "🂂 ONE", "off": "➡ OFF"}
             if st.button(rep_labels.get(st.session_state.repeat_mode, "🔁 ALL"), use_container_width=True, key="deck_repeat", help="반복 모드"):
                 next_mode_map = {"all": "one", "one": "off", "off": "all"}
                 st.session_state.repeat_mode = next_mode_map[st.session_state.repeat_mode]
@@ -1493,7 +1470,7 @@ with deck_col_player:
                     toggle_favorite(st.session_state.title, st.session_state.url)
                     st.rerun()
 
-        # --- MP3 Download Row ---
+        # --- MP3 Download Row (403 및 증발 버그 개선) ---
         if is_active and st.session_state.url and YTDLP_AVAILABLE:
             st.markdown("""
             <div style="margin-top:10px;padding:10px 14px;background:rgba(15,23,42,0.5);
@@ -1503,29 +1480,39 @@ with deck_col_player:
                     💾 MP3 EXPORT
                 </div>
                 <div style="font-size:0.78rem;color:#94a3b8;">
-                    현재 트랙을 192kbps MP3로 추출합니다. yt-dlp + FFmpeg 처리 (수십 초 소요)
+                    현재 트랙을 192kbps MP3로 추출합니다. (변환 시 수십 초 소요)
                 </div>
             </div>
             """, unsafe_allow_html=True)
-            dl_col_btn, dl_col_info = st.columns([1.2, 3])
-            with dl_col_btn:
-                if st.button("⬇ MP3 다운로드", use_container_width=True, key="deck_mp3_download_btn", help="현재 재생 중인 트랙을 MP3로 저장"):
-                    dl_title = st.session_state.title or "audio"
-                    dl_url = st.session_state.url
-                    with st.spinner(f"🔄 '{dl_title}' MP3 변환 중... (잠시만 기다려주세요)"):
-                        mp3_data = download_mp3_from_youtube(dl_url, dl_title)
-                    if mp3_data:
-                        safe_name = re.sub(r'[\\/:*?"<>|]', "", dl_title).strip() or "audio"
-                        st.download_button(
-                            label=f"📥 '{safe_name}.mp3' 저장",
-                            data=mp3_data,
-                            file_name=f"{safe_name}.mp3",
-                            mime="audio/mpeg",
-                            key="deck_mp3_save_btn",
-                            use_container_width=True,
-                        )
-                        st.toast(f"'{safe_name}.mp3' 변환 완료! 저장 버튼을 눌러주세요.")
 
+            # 곡이 바뀌면 기존 변환 캐시 리셋
+            if st.session_state.get("dl_cached_url") != st.session_state.url:
+                st.session_state.dl_cached_bytes = None
+                st.session_state.dl_cached_name = None
+                st.session_state.dl_cached_url = st.session_state.url
+
+            dl_col_btn, dl_col_save = st.columns([1.2, 1.5])
+            with dl_col_btn:
+                if st.button("⬇ MP3 변환하기", use_container_width=True, key="deck_mp3_download_btn"):
+                    dl_title = st.session_state.title or "audio"
+                    safe_filename = re.sub(r'[\\/:*?"<>|]', "", dl_title).strip() or "audio"
+                    with st.spinner(f"🔄 '{dl_title}' 변환 중... 잠시만 기다려."):
+                        data = download_mp3_from_youtube(st.session_state.url, dl_title)
+                    if data:
+                        st.session_state.dl_cached_bytes = data
+                        st.session_state.dl_cached_name = f"{safe_filename}.mp3"
+                        st.toast("변환 완료. 옆의 저장 버튼을 눌러.")
+
+            with dl_col_save:
+                if st.session_state.get("dl_cached_bytes"):
+                    st.download_button(
+                        label=f"📥 '{st.session_state.dl_cached_name}' PC로 저장",
+                        data=st.session_state.dl_cached_bytes,
+                        file_name=st.session_state.dl_cached_name,
+                        mime="audio/mpeg",
+                        key="deck_mp3_save_btn",
+                        use_container_width=True,
+                    )
 
     else:
         st.markdown('<div class="video-cinema-deck">', unsafe_allow_html=True)
@@ -1596,13 +1583,13 @@ with deck_col_player:
                                             window._ftubeVideoFallbackTimer = setTimeout(function() {{
                                                 var poll = setInterval(function() {{
                                                     try {{
-                                                        var state = window._ftubeVideoPlayer.getPlayerState();
-                                                        var cur = window._ftubeVideoPlayer.getCurrentTime();
-                                                        var d = window._ftubeVideoPlayer.getDuration();
+                                                        var state = window._ftubePlayer.getPlayerState();
+                                                        var cur = window._ftubePlayer.getCurrentTime();
+                                                        var d = window._ftubePlayer.getDuration();
                                                         if (state === 0 || (d > 0 && cur >= d - 0.5)) {{
                                                             clearInterval(poll);
                                                             sessionStorage.removeItem("ftube_play_pos_" + vid);
-                                                            if (window._ftubeVideoSaveLoop) clearInterval(window._ftubeVideoSaveLoop);
+                                                            if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
                                                             ftube_trigger_next();
                                                         }}
                                                     }} catch(e) {{ clearInterval(poll); }}
@@ -1615,8 +1602,8 @@ with deck_col_player:
                             onStateChange: function(e) {{
                                 if (e.data === 0) {{
                                     sessionStorage.removeItem("ftube_play_pos_" + vid);
-                                    if (window._ftubeVideoSaveLoop) clearInterval(window._ftubeVideoSaveLoop);
-                                    if (window._ftubeVideoFallbackTimer) clearTimeout(window._ftubeVideoFallbackTimer);
+                                    if (window._ftubeSaveLoop) clearInterval(window._ftubeSaveLoop);
+                                    if (window._ftubeFallbackTimer) clearTimeout(window._ftubeFallbackTimer);
                                     ftube_trigger_next();
                                 }}
                             }}
@@ -1681,7 +1668,7 @@ with deck_col_player:
                 st.session_state.shuffle = not st.session_state.shuffle
                 st.rerun()
         with c_v_rep:
-            rep_labels = {"all": "🔁 ALL", "one": "🔂 ONE", "off": "➡ OFF"}
+            rep_labels = {"all": "🔁 ALL", "one": "🂂 ONE", "off": "➡ OFF"}
             if st.button(rep_labels.get(st.session_state.repeat_mode, "🔁 ALL"), use_container_width=True, key="v_deck_repeat"):
                 next_mode_map = {"all": "one", "one": "off", "off": "all"}
                 st.session_state.repeat_mode = next_mode_map[st.session_state.repeat_mode]
